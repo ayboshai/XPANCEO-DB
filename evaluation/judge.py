@@ -100,10 +100,13 @@ class LLMJudge:
             JudgeResponse with scores
         """
         # Build context string from retrieved chunks
+        # Use full_content when available for accurate faithfulness/recall scoring
         context_parts = []
         for chunk in prediction.retrieved_chunks:
-            context_parts.append(f"[{chunk.doc_id}|p{chunk.page}|{chunk.type}]: {chunk.preview}")
-        context = "\n".join(context_parts) if context_parts else "(no context retrieved)"
+            # Prefer full_content over preview for accurate evaluation
+            content = chunk.full_content if chunk.full_content else chunk.preview
+            context_parts.append(f"[{chunk.doc_id}|p{chunk.page}|{chunk.type}]:\n{content}")
+        context = "\n\n".join(context_parts) if context_parts else "(no context retrieved)"
         
         # Determine if this is a no-answer question
         is_no_answer = prediction.slice == "no-answer" or (expected and not expected.has_answer)

@@ -228,8 +228,25 @@ class FAISSIndex:
         return self.index.ntotal if self._index else 0
 
 
-def create_index(config: dict) -> FAISSIndex:
-    """Factory function to create index from config."""
+def create_index(config: dict) -> "FAISSIndex":
+    """
+    Factory function to create index from config.
+    Supports index_backend: faiss | qdrant
+    """
+    backend = config.get("index_backend", "faiss")
+    
+    if backend == "qdrant":
+        from .index_qdrant import QdrantIndex
+        raise NotImplementedError(
+            "Qdrant backend not yet implemented. "
+            "Set index_backend: faiss in config/master_config.yaml"
+        )
+    elif backend != "faiss":
+        raise ValueError(
+            f"Unknown index_backend: {backend}. "
+            f"Supported: faiss, qdrant"
+        )
+    
     return FAISSIndex(
         index_dir=config.get("index_dir", "data/index"),
         dimension=1536,  # text-embedding-3-small

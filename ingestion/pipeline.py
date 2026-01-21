@@ -130,8 +130,12 @@ class IngestionPipeline:
         if doc_id in existing_doc_ids:
             if reupload_policy == "overwrite":
                 logger.info(f"Overwriting existing doc_id: {doc_id}")
+                # CRITICAL: Delete from index FIRST (before chunks.jsonl is modified)
+                self._remove_from_index_by_doc_id(doc_id)
+                # Then delete from chunks.jsonl
                 self._remove_doc_chunks(doc_id)
-                self._remove_from_index(doc_id)
+                # Then remove from registry
+                self._remove_from_registry(doc_id)
             else:  # new_version
                 # Generate new unique doc_id
                 import hashlib
@@ -403,18 +407,65 @@ class IngestionPipeline:
         logger.info(f"Removed {removed} chunks for doc_id={doc_id}")
         return removed
     
-    def _remove_from_index(self, doc_id: str) -> int:
-        """Remove vectors for doc_id from index. Returns count removed."""
-        # Get chunk IDs for this doc
+    def _remove_from_index_by_doc_id(self, doc_id: str) -> int:
+        """
+        Remove vectors for doc_id from index.
+        MUST be called BEFORE _remove_doc_chunks to read chunk IDs.
+        """
+        # Get chunk IDs from chunks.jsonl BEFORE it's modified
         chunk_ids_to_remove = []
         if os.path.exists(self.chunks_file):
-            # Read from backup or iterate index metadata
-            for chunk in self.load_chunks():
-                if chunk.doc_id == doc_id:
-                    chunk_ids_to_remove.append(chunk.chunk_id)
+            with open(self.chunks_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        chunk = Chunk.from_jsonl(line)
+                        if chunk.doc_id == doc_id:
+                            chunk_ids_to_remove.append(chunk.chunk_id)
+                    except Exception:
+                        pass
         
         if chunk_ids_to_remove:
             self.index.delete(chunk_ids_to_remove)
             logger.info(f"Removed {len(chunk_ids_to_remove)} vectors for doc_id={doc_id}")
         
         return len(chunk_ids_to_remove)
+    
+    def _remove_from_registry(self, doc_id: str) -> bool:
+        """Remove entry for doc_id from pdf_registry.jsonl."""
+        if not os.path.exists(self.registry_file):
+            return False
+        
+        remaining = []
+        removed = False
+        
+        with open(self.registry_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = RegistryEntry.from_jsonl(line)
+                    if entry.doc_id == doc_id:
+                        removed = True
+                    else:
+                        remaining.append(line)
+                except Exception:
+                    remaining.append(line)
+        
+        # Rewrite registry without the removed doc
+        with open(self.registry_file, "w", encoding="utf-8") as f:
+            for line in remaining:
+                f.write(line + "\n")
+        
+        if removed:
+            logger.info(f"Removed doc_id={doc_id} from registry")
+        
+        return removed
+    
+    # Keep old method for backwards compatibility (deprecated)
+    def _remove_from_index(self, doc_id: str) -> int:
+        """Deprecated: Use _remove_from_index_by_doc_id instead."""
+        return self._remove_from_index_by_doc_id(doc_id)

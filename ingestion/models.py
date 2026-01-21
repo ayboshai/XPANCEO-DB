@@ -187,6 +187,7 @@ class SourceRef(BaseModel):
     type: str
     score: float
     preview: str  # First 20 words or table head
+    full_content: Optional[str] = None  # Full text for judge evaluation
 
 
 class PredictionEntry(BaseModel):
@@ -244,7 +245,7 @@ class ScoredChunk(BaseModel):
     chunk: Chunk
     score: float
     
-    def to_source_ref(self, preview_words: int = 20) -> SourceRef:
+    def to_source_ref(self, preview_words: int = 20, include_full: bool = True) -> SourceRef:
         """Convert to SourceRef for output."""
         words = self.chunk.content.split()[:preview_words]
         preview = " ".join(words)
@@ -258,4 +259,5 @@ class ScoredChunk(BaseModel):
             type=self.chunk.type,
             score=self.score,
             preview=preview,
+            full_content=self.chunk.content if include_full else None,
         )
