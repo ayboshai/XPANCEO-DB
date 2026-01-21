@@ -121,26 +121,49 @@ class LLMJudge:
             no_answer_instruction=no_answer_instruction,
         )
         
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=500,
-            )
-            
-            result = response.choices[0].message.content.strip()
-            scores = self._parse_scores(result, is_no_answer)
-            
-        except Exception as e:
-            logger.error(f"Judge API call failed: {e}")
+        # Call judge with retry and backoff
+        import time
+        from shared import load_config
+        
+        config = load_config()
+        max_retries = config.get("api_max_retries", 3)
+        backoff_base = config.get("api_backoff_base", 2.0)
+        timeout = config.get("api_timeout", 30)
+        
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    max_tokens=500,
+                    timeout=timeout,
+                )
+                
+                result = response.choices[0].message.content.strip()
+                scores = self._parse_scores(result, is_no_answer)
+                break
+                
+            except Exception as e:
+                last_error = e
+                wait_time = backoff_base ** attempt
+                logger.warning(
+                    f"Judge API attempt {attempt + 1}/{max_retries} failed: {e}. "
+                    f"Retry in {wait_time:.1f}s..."
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(wait_time)
+        else:
+            # All retries failed
+            logger.error(f"Judge API failed after {max_retries} attempts: {last_error}")
             scores = JudgeScores(
                 faithfulness=0.0,
                 relevancy=0.0,
                 context_precision=0.0,
                 context_recall=0.0,
                 no_answer_correct=None,
-                notes=f"Error: {e}",
+                notes=f"API Error after {max_retries} retries: {last_error}",
             )
         
         return JudgeResponse(

@@ -48,6 +48,7 @@ class VisionCaptioner:
         max_retries: int = 3,
         backoff_base: float = 2.0,
         timeout: int = 30,
+        rate_limit_rpm: int = 60,  # Vision has stricter limits
     ):
         self.api_key = api_key
         self.model = model
@@ -55,6 +56,11 @@ class VisionCaptioner:
         self.max_retries = max_retries
         self.backoff_base = backoff_base
         self.timeout = timeout
+        self.rate_limit_rpm = rate_limit_rpm
+        
+        # Rate limiting
+        self._min_delay = 60.0 / rate_limit_rpm if rate_limit_rpm > 0 else 0
+        self._last_request_time = 0.0
         
         if cache_dir:
             os.makedirs(cache_dir, exist_ok=True)
@@ -75,9 +81,17 @@ class VisionCaptioner:
             logger.debug(f"Vision cache hit for {image_path}")
             return cached, True
         
-        # Call Vision API with retry
+        # Call Vision API with retry and rate limiting
         for attempt in range(self.max_retries):
             try:
+                # Rate limiting
+                if self._min_delay > 0:
+                    elapsed = time.time() - self._last_request_time
+                    if elapsed < self._min_delay:
+                        time.sleep(self._min_delay - elapsed)
+                
+                self._last_request_time = time.time()
+                
                 caption = self._call_vision_api(image_path)
                 self._save_cache(image_hash, caption)
                 return caption, True

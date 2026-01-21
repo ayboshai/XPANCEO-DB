@@ -45,6 +45,7 @@ class OpenAIEmbedder:
         max_retries: int = 3,
         backoff_base: float = 2.0,
         timeout: int = 30,
+        rate_limit_rpm: int = 500,
     ):
         self.api_key = api_key
         self.model = model
@@ -52,6 +53,11 @@ class OpenAIEmbedder:
         self.max_retries = max_retries
         self.backoff_base = backoff_base
         self.timeout = timeout
+        self.rate_limit_rpm = rate_limit_rpm
+        
+        # Rate limiting: min delay between requests
+        self._min_delay = 60.0 / rate_limit_rpm if rate_limit_rpm > 0 else 0
+        self._last_request_time = 0.0
         
         if cache_dir:
             os.makedirs(cache_dir, exist_ok=True)
@@ -106,9 +112,17 @@ class OpenAIEmbedder:
         return results[0] if results else []
     
     def _embed_with_retry(self, texts: list[str]) -> list[list[float]]:
-        """Embed texts with retry logic."""
+        """Embed texts with retry logic and rate limiting."""
         for attempt in range(self.max_retries):
             try:
+                # Rate limiting
+                if self._min_delay > 0:
+                    elapsed = time.time() - self._last_request_time
+                    if elapsed < self._min_delay:
+                        time.sleep(self._min_delay - elapsed)
+                
+                self._last_request_time = time.time()
+                
                 response = self.client.embeddings.create(
                     model=self.model,
                     input=texts,
@@ -191,4 +205,5 @@ def create_embedder(config: dict) -> OpenAIEmbedder:
         max_retries=config.get("api_max_retries", 3),
         backoff_base=config.get("api_backoff_base", 2.0),
         timeout=config.get("api_timeout", 30),
+        rate_limit_rpm=config.get("api_rate_limit_rpm", 500),
     )

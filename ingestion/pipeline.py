@@ -136,6 +136,8 @@ class IngestionPipeline:
                 self._remove_doc_chunks(doc_id)
                 # Then remove from registry
                 self._remove_from_registry(doc_id)
+                # Clean up related cache files
+                self._cleanup_cache_for_doc(doc_id)
             else:  # new_version
                 # Generate new unique doc_id
                 import hashlib
@@ -469,3 +471,38 @@ class IngestionPipeline:
     def _remove_from_index(self, doc_id: str) -> int:
         """Deprecated: Use _remove_from_index_by_doc_id instead."""
         return self._remove_from_index_by_doc_id(doc_id)
+    
+    def _cleanup_cache_for_doc(self, doc_id: str) -> int:
+        """
+        Clean up cache files related to a doc_id on overwrite.
+        Deletes cached OCR/vision files for images from that doc.
+        """
+        from pathlib import Path
+        import shutil
+        
+        cleaned = 0
+        
+        # Get image hashes from chunks before they were deleted (already deleted)
+        # So we clean by doc_id prefix in cache dirs
+        cache_dirs = [
+            self.config.get("ocr_cache_dir", "data/cache/ocr"),
+            self.config.get("vision_cache_dir", "data/cache/vision"),
+        ]
+        
+        # Clean images directory for this doc
+        images_dir = os.path.join(self.config.get("cache_dir", "data/cache"), "images")
+        doc_images_dir = os.path.join(images_dir, doc_id)
+        
+        if os.path.exists(doc_images_dir):
+            try:
+                shutil.rmtree(doc_images_dir)
+                logger.info(f"Cleaned cache images for doc_id={doc_id}")
+                cleaned += 1
+            except Exception as e:
+                logger.warning(f"Failed to clean images cache: {e}")
+        
+        # Note: OCR/vision caches are keyed by image_hash not doc_id
+        # For full cleanup, we'd need to track image_hash -> doc_id mapping
+        # This is a partial solution - full cleanup requires image_hash tracking
+        
+        return cleaned
