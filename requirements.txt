@@ -1,0 +1,37 @@
+# XPANCEO DB Dependencies
+# Core
+openai>=1.0.0
+pydantic>=2.0.0
+pyyaml>=6.0
+
+# PDF Processing
+unstructured[pdf]>=0.10.0
+pytesseract>=0.3.10
+pdf2image>=1.16.0
+PyPDF2>=3.0.0  # Fallback parser
+
+# Vector Index
+faiss-cpu>=1.7.4
+# qdrant-client>=1.7.0  # Optional: uncomment for Qdrant
+
+# Embeddings & LLM
+tiktoken>=0.5.0  # Token counting
+
+# UI
+streamlit>=1.28.0
+
+# Evaluation
+ragas>=0.1.0
+datasets>=2.14.0
+
+# Hybrid Retrieval (optional)
+rank-bm25>=0.2.2
+
+# Utilities
+python-dotenv>=1.0.0
+tqdm>=4.66.0
+Pillow>=10.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0

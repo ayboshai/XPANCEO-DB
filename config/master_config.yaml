@@ -1,0 +1,85 @@
+# =============================================================================
+# XPANCEO DB - Master Configuration
+# =============================================================================
+# All tunables in one place. No hardcoded values in code.
+# Environment variables: ${VAR_NAME} syntax
+
+# =============================================================================
+# API Keys (from environment variables)
+# =============================================================================
+openai_api_key: ${OPENAI_API_KEY}
+
+# =============================================================================
+# Models
+# =============================================================================
+model_chat: gpt-4o-mini              # LLM for generation
+model_vision: gpt-4o-mini            # Vision API for image captioning
+model_embed: text-embedding-3-small  # Embedding model (dim=1536)
+
+# =============================================================================
+# Index Backend
+# =============================================================================
+index_backend: faiss                 # faiss | qdrant
+top_k: 5                             # Number of chunks to retrieve
+
+# Hybrid retrieval (optional)
+hybrid_enabled: false                # Enable BM25 union with dense search
+
+# =============================================================================
+# Chunking
+# =============================================================================
+chunk_size_tokens: 512               # Max tokens per chunk
+chunk_overlap_tokens: 50             # Overlap between chunks
+
+# =============================================================================
+# OCR Thresholds (ANY condition triggers Vision fallback)
+# =============================================================================
+ocr_confidence_threshold: 60         # Tesseract confidence 0-100
+ocr_min_chars: 50                    # Minimum character count
+ocr_min_tokens: 10                   # Minimum word count
+ocr_min_alpha_ratio: 0.4             # Alphanumeric ratio
+
+# =============================================================================
+# API Resilience
+# =============================================================================
+api_max_retries: 3                   # Retry count for API failures
+api_backoff_base: 2.0                # Exponential backoff base (seconds)
+api_timeout: 30                      # Request timeout (seconds)
+api_rate_limit_rpm: 500              # Rate limit (requests per minute)
+
+# =============================================================================
+# Paths
+# =============================================================================
+data_dir: data                       # Root data directory
+cache_dir: data/cache                # Cache root
+index_dir: data/index                # Vector index storage
+reports_dir: evaluation/runs         # Evaluation outputs
+
+# Cache subdirectories (auto-created)
+ocr_cache_dir: data/cache/ocr               # OCR results by image_hash
+vision_cache_dir: data/cache/vision         # Vision captions by image_hash
+embedding_cache_dir: data/cache/embeddings  # Embeddings by content hash
+
+# =============================================================================
+# Parallelism
+# =============================================================================
+max_concurrent_embeddings: 5         # Parallel embedding requests
+max_concurrent_vision: 2             # Parallel vision requests
+
+# =============================================================================
+# Document ID Policy
+# =============================================================================
+doc_id_strategy: hash                # hash | filename | uuid
+# hash = md5(filepath + mtime) — deterministic, changes on file update
+# filename = file stem — simple, may collide
+# uuid = random uuid — always unique
+
+# Re-upload behavior
+reupload_policy: new_version         # new_version | overwrite
+# new_version = generate new doc_id, keep old chunks
+# overwrite = delete old chunks, replace with new
+
+# =============================================================================
+# Logging
+# =============================================================================
+log_level: INFO                      # DEBUG | INFO | WARNING | ERROR
