@@ -135,7 +135,9 @@ xpanceo-db/
 
 - **Simplicity**: Local file-based index, no server required
 - **Sufficient for MVP**: Up to 1M vectors on single machine
-- **Swappable**: Qdrant backend is a placeholder ready for implementation
+- **Swappable**: Architecture supports backend switching
+
+> ⚠️ **Note**: Currently only FAISS is supported. Setting `index_backend: qdrant` will raise `NotImplementedError`. Qdrant support is planned for future releases.
 
 ### Why No Rerankers/Agents?
 
