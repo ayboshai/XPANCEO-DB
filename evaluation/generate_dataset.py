@@ -82,12 +82,35 @@ class DatasetGenerator:
         self,
         chunks: list[Chunk],
         num_questions: int = 20,
+        use_ragas: bool = True,
     ) -> list[DatasetEntry]:
-        """Generate overall questions from all chunks."""
+        """
+        Generate overall questions from all chunks.
+        Uses RAGAS TestsetGenerator if available, falls back to custom LLM.
+        """
         entries = []
+        
+        # Try RAGAS first if requested
+        if use_ragas:
+            try:
+                entries = self._generate_with_ragas(chunks, num_questions)
+                if entries:
+                    logger.info(f"Generated {len(entries)} questions via RAGAS")
+                    return entries
+            except ImportError:
+                logger.warning("RAGAS not installed. Falling back to custom LLM. Run: pip install ragas")
+            except Exception as e:
+                logger.warning(f"RAGAS generation failed: {e}. Falling back to custom LLM.")
+        
+        # Fallback to custom LLM generation
+        logger.info("Using custom LLM for dataset generation")
         
         # Sample chunks
         sample_size = min(len(chunks), num_questions * 2)
+        if sample_size == 0:
+            logger.error("No chunks available for question generation")
+            return []
+        
         sampled = random.sample(chunks, sample_size)
         
         for chunk in sampled[:num_questions]:
@@ -103,6 +126,61 @@ class DatasetGenerator:
                     ))
             except Exception as e:
                 logger.warning(f"Failed to generate question: {e}")
+        
+        return entries
+    
+    def _generate_with_ragas(self, chunks: list[Chunk], num_questions: int) -> list[DatasetEntry]:
+        """Generate questions using RAGAS TestsetGenerator."""
+        from ragas.testset.generator import TestsetGenerator
+        from ragas.testset.evolutions import simple, reasoning, multi_context
+        from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+        from langchain.docstore.document import Document
+        
+        # Convert chunks to LangChain documents
+        documents = [
+            Document(
+                page_content=chunk.content,
+                metadata={
+                    "doc_id": chunk.doc_id,
+                    "page": chunk.page,
+                    "type": chunk.type,
+                    "chunk_id": chunk.chunk_id,
+                }
+            )
+            for chunk in chunks if chunk.content.strip()
+        ]
+        
+        if not documents:
+            raise ValueError("No valid documents for RAGAS")
+        
+        # Initialize generator with OpenAI models
+        generator_llm = ChatOpenAI(model=self.model, api_key=self.api_key)
+        critic_llm = ChatOpenAI(model=self.model, api_key=self.api_key)
+        embeddings = OpenAIEmbeddings(api_key=self.api_key)
+        
+        generator = TestsetGenerator.from_langchain(
+            generator_llm=generator_llm,
+            critic_llm=critic_llm,
+            embeddings=embeddings,
+        )
+        
+        # Generate testset
+        testset = generator.generate_with_langchain_docs(
+            documents=documents,
+            test_size=num_questions,
+            distributions={simple: 0.5, reasoning: 0.3, multi_context: 0.2},
+        )
+        
+        # Convert to DatasetEntry
+        entries = []
+        for row in testset.to_pandas().itertuples():
+            entries.append(DatasetEntry(
+                question=row.question,
+                slice="overall",
+                has_answer=True,
+                expected_answer=row.ground_truth if hasattr(row, 'ground_truth') else row.answer,
+                doc_id=None,  # RAGAS may not track this
+            ))
         
         return entries
     
@@ -301,23 +379,51 @@ Respond in JSON format:
         table_count: int = 10,
         image_count: int = 10,
         no_answer_count: int = 10,
+        min_ratio: float = 0.5,  # Warn if less than 50% of target achieved
     ) -> list[DatasetEntry]:
-        """Generate complete dataset with all slices."""
+        """
+        Generate complete dataset with all slices.
+        Logs warnings if target counts not achieved.
+        
+        Args:
+            min_ratio: Minimum ratio of target to consider acceptable (0.5 = 50%)
+        """
         entries = []
+        warnings = []
         
         logger.info("Generating overall questions...")
-        entries.extend(self.generate_overall(chunks, overall_count))
+        overall_entries = self.generate_overall(chunks, overall_count)
+        entries.extend(overall_entries)
+        if len(overall_entries) < overall_count * min_ratio:
+            warnings.append(f"overall: {len(overall_entries)}/{overall_count} (below {min_ratio*100:.0f}% target)")
         
         logger.info("Generating table questions...")
-        entries.extend(self.generate_table_slice(chunks, table_count))
+        table_entries = self.generate_table_slice(chunks, table_count)
+        entries.extend(table_entries)
+        if len(table_entries) < table_count * min_ratio:
+            warnings.append(f"table: {len(table_entries)}/{table_count} (below {min_ratio*100:.0f}% target)")
         
         logger.info("Generating image questions...")
-        entries.extend(self.generate_image_slice(chunks, image_count))
+        image_entries = self.generate_image_slice(chunks, image_count)
+        entries.extend(image_entries)
+        if len(image_entries) < image_count * min_ratio:
+            warnings.append(f"image: {len(image_entries)}/{image_count} (below {min_ratio*100:.0f}% target)")
         
         logger.info("Generating no-answer questions...")
-        entries.extend(self.generate_no_answer_slice(no_answer_count))
+        no_answer_entries = self.generate_no_answer_slice(no_answer_count)
+        entries.extend(no_answer_entries)
+        if len(no_answer_entries) < no_answer_count * min_ratio:
+            warnings.append(f"no-answer: {len(no_answer_entries)}/{no_answer_count} (below {min_ratio*100:.0f}% target)")
         
+        # Log slice statistics
+        logger.info(f"Slice statistics: overall={len(overall_entries)}, table={len(table_entries)}, "
+                   f"image={len(image_entries)}, no-answer={len(no_answer_entries)}")
         logger.info(f"Generated {len(entries)} total questions")
+        
+        # Warn about undercounts
+        if warnings:
+            logger.warning(f"Some slices below target: {'; '.join(warnings)}")
+        
         return entries
 
 
