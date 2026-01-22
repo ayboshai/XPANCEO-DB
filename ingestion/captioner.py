@@ -81,20 +81,22 @@ class VisionCaptioner:
             logger.debug(f"Vision cache hit for {image_path}")
             return cached, True
         
-        # Call Vision API with retry and rate limiting
+        # Call Vision API with retry, rate limiting, and concurrency control
+        from shared import get_sync_limiter
+        limiter = get_sync_limiter()
+        
         for attempt in range(self.max_retries):
             try:
-                # Rate limiting
-                if self._min_delay > 0:
-                    elapsed = time.time() - self._last_request_time
-                    if elapsed < self._min_delay:
-                        time.sleep(self._min_delay - elapsed)
+                # Acquire semaphore + rate limit
+                limiter.acquire_vision()
                 
-                self._last_request_time = time.time()
-                
-                caption = self._call_vision_api(image_path)
-                self._save_cache(image_hash, caption)
-                return caption, True
+                try:
+                    caption = self._call_vision_api(image_path)
+                    self._save_cache(image_hash, caption)
+                    return caption, True
+                finally:
+                    limiter.release_vision()
+                    
             except Exception as e:
                 wait_time = self.backoff_base ** attempt
                 logger.warning(f"Vision API attempt {attempt + 1} failed: {e}. Retrying in {wait_time}s...")

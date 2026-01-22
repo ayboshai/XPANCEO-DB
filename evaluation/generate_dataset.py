@@ -365,6 +365,7 @@ Respond in JSON format:
         image_count: int = 10,
         no_answer_count: int = 10,
         min_ratio: float = 0.5,  # Warn if less than 50% of target achieved
+        strict: bool = False,  # If True, raise error when slices below min_ratio
     ) -> list[DatasetEntry]:
         """
         Generate complete dataset with all slices.
@@ -372,6 +373,7 @@ Respond in JSON format:
         
         Args:
             min_ratio: Minimum ratio of target to consider acceptable (0.5 = 50%)
+            strict: If True, raise ValueError when any slice is below min_ratio
         """
         entries = []
         warnings = []
@@ -408,6 +410,13 @@ Respond in JSON format:
         # Warn about undercounts
         if warnings:
             logger.warning(f"Some slices below target: {'; '.join(warnings)}")
+            
+            # In strict mode, fail if any slice is below target
+            if strict:
+                raise ValueError(
+                    f"Dataset generation failed in strict mode. "
+                    f"Slices below {min_ratio*100:.0f}% target: {'; '.join(warnings)}"
+                )
         
         return entries
 

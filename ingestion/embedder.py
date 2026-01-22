@@ -112,29 +112,31 @@ class OpenAIEmbedder:
         return results[0] if results else []
     
     def _embed_with_retry(self, texts: list[str]) -> list[list[float]]:
-        """Embed texts with retry logic and rate limiting."""
+        """Embed texts with retry logic, rate limiting, and concurrency control."""
+        from shared import get_sync_limiter
+        limiter = get_sync_limiter()
+        
         for attempt in range(self.max_retries):
             try:
-                # Rate limiting
-                if self._min_delay > 0:
-                    elapsed = time.time() - self._last_request_time
-                    if elapsed < self._min_delay:
-                        time.sleep(self._min_delay - elapsed)
+                # Acquire semaphore + rate limit
+                limiter.acquire_embedding()
                 
-                self._last_request_time = time.time()
-                
-                response = self.client.embeddings.create(
-                    model=self.model,
-                    input=texts,
-                    timeout=self.timeout,
-                )
-                
-                # Sort by index to maintain order
-                embeddings = [None] * len(texts)
-                for item in response.data:
-                    embeddings[item.index] = item.embedding
-                
-                return embeddings
+                try:
+                    response = self.client.embeddings.create(
+                        model=self.model,
+                        input=texts,
+                        timeout=self.timeout,
+                    )
+                    
+                    # Sort by index to maintain order
+                    embeddings = [None] * len(texts)
+                    for item in response.data:
+                        embeddings[item.index] = item.embedding
+                    
+                    return embeddings
+                    
+                finally:
+                    limiter.release_embedding()
                 
             except Exception as e:
                 wait_time = self.backoff_base ** attempt

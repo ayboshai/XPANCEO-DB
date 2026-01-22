@@ -130,20 +130,30 @@ class LLMJudge:
         backoff_base = config.get("api_backoff_base", 2.0)
         timeout = config.get("api_timeout", 30)
         
+        # Get rate limiter for concurrency control
+        from shared import get_sync_limiter
+        limiter = get_sync_limiter()
+        
         last_error = None
         for attempt in range(max_retries):
             try:
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.1,
-                    max_tokens=500,
-                    timeout=timeout,
-                )
+                # Acquire semaphore + rate limit
+                limiter.acquire_judge()
                 
-                result = response.choices[0].message.content.strip()
-                scores = self._parse_scores(result, is_no_answer)
-                break
+                try:
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.1,
+                        max_tokens=500,
+                        timeout=timeout,
+                    )
+                    
+                    result = response.choices[0].message.content.strip()
+                    scores = self._parse_scores(result, is_no_answer)
+                    break
+                finally:
+                    limiter.release_judge()
                 
             except Exception as e:
                 last_error = e

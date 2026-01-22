@@ -260,3 +260,89 @@ def get_limiter(config: Optional[dict] = None) -> ParallelismLimiter:
     if _limiter is None or config is not None:
         _limiter = ParallelismLimiter(config)
     return _limiter
+
+
+# =============================================================================
+# Synchronous Rate Limiter (for sync embedder/captioner/judge)
+# =============================================================================
+
+import threading
+
+
+class SyncRateLimiter:
+    """
+    Synchronous rate limiter with semaphore for concurrent limits.
+    Thread-safe for use in multi-threaded contexts.
+    """
+    
+    def __init__(self, config: Optional[dict] = None):
+        self.config = config or load_config()
+        
+        # Concurrency limits
+        max_embed = self.config.get("max_concurrent_embeddings", 5)
+        max_vision = self.config.get("max_concurrent_vision", 2)
+        max_judge = self.config.get("max_concurrent_judge", 3)
+        
+        self._embed_sem = threading.Semaphore(max_embed)
+        self._vision_sem = threading.Semaphore(max_vision)
+        self._judge_sem = threading.Semaphore(max_judge)
+        
+        # RPM-based rate limiting
+        self.rpm = self.config.get("api_rate_limit_rpm", 500)
+        self._min_delay = 60.0 / self.rpm if self.rpm > 0 else 0
+        self._last_call: dict[str, float] = {}
+        self._lock = threading.Lock()
+    
+    def _wait_for_rate_limit(self, key: str) -> None:
+        """Wait if needed to respect rate limit."""
+        if self._min_delay <= 0:
+            return
+        
+        with self._lock:
+            now = time.time()
+            last = self._last_call.get(key, 0)
+            elapsed = now - last
+            
+            if elapsed < self._min_delay:
+                time.sleep(self._min_delay - elapsed)
+            
+            self._last_call[key] = time.time()
+    
+    def acquire_embedding(self) -> None:
+        """Acquire embedding slot (blocks if at limit)."""
+        self._embed_sem.acquire()
+        self._wait_for_rate_limit("embed")
+    
+    def release_embedding(self) -> None:
+        """Release embedding slot."""
+        self._embed_sem.release()
+    
+    def acquire_vision(self) -> None:
+        """Acquire vision slot (blocks if at limit)."""
+        self._vision_sem.acquire()
+        self._wait_for_rate_limit("vision")
+    
+    def release_vision(self) -> None:
+        """Release vision slot."""
+        self._vision_sem.release()
+    
+    def acquire_judge(self) -> None:
+        """Acquire judge slot (blocks if at limit)."""
+        self._judge_sem.acquire()
+        self._wait_for_rate_limit("judge")
+    
+    def release_judge(self) -> None:
+        """Release judge slot."""
+        self._judge_sem.release()
+
+
+# Global sync limiter
+_sync_limiter: Optional[SyncRateLimiter] = None
+
+
+def get_sync_limiter(config: Optional[dict] = None) -> SyncRateLimiter:
+    """Get or create sync rate limiter."""
+    global _sync_limiter
+    if _sync_limiter is None or config is not None:
+        _sync_limiter = SyncRateLimiter(config)
+    return _sync_limiter
