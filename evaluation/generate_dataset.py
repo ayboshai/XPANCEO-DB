@@ -98,12 +98,12 @@ class DatasetGenerator:
                     logger.info(f"Generated {len(entries)} questions via RAGAS")
                     return entries
             except ImportError:
-                logger.warning("RAGAS not installed. Falling back to custom LLM. Run: pip install ragas")
+                logger.warning("⚠️ RAGAS UNAVAILABLE: ragas package not installed. Using custom LLM generator. Run: pip install ragas langchain-openai")
             except Exception as e:
-                logger.warning(f"RAGAS generation failed: {e}. Falling back to custom LLM.")
+                logger.warning(f"⚠️ RAGAS FAILED: {e}. Falling back to custom LLM generator.")
         
         # Fallback to custom LLM generation
-        logger.info("Using custom LLM for dataset generation")
+        logger.warning("📝 Using custom LLM generator (not RAGAS) for dataset generation")
         
         # Sample chunks
         sample_size = min(len(chunks), num_questions * 2)

@@ -130,14 +130,17 @@ class IngestionPipeline:
         if doc_id in existing_doc_ids:
             if reupload_policy == "overwrite":
                 logger.info(f"Overwriting existing doc_id: {doc_id}")
-                # CRITICAL: Delete from index FIRST (before chunks.jsonl is modified)
+                # CRITICAL ORDER:
+                # 1. Collect image hashes BEFORE deletion (for cache cleanup)
+                image_hashes = self._get_image_hashes_for_doc(doc_id)
+                # 2. Delete from index FIRST (before chunks.jsonl is modified)
                 self._remove_from_index_by_doc_id(doc_id)
-                # Then delete from chunks.jsonl
+                # 3. Delete from chunks.jsonl
                 self._remove_doc_chunks(doc_id)
-                # Then remove from registry
+                # 4. Remove from registry
                 self._remove_from_registry(doc_id)
-                # Clean up related cache files
-                self._cleanup_cache_for_doc(doc_id)
+                # 5. Clean up all related cache files (using collected hashes)
+                self._cleanup_cache_for_doc(doc_id, image_hashes)
             else:  # new_version
                 # Generate new unique doc_id
                 import hashlib
@@ -472,24 +475,51 @@ class IngestionPipeline:
         """Deprecated: Use _remove_from_index_by_doc_id instead."""
         return self._remove_from_index_by_doc_id(doc_id)
     
-    def _cleanup_cache_for_doc(self, doc_id: str) -> int:
+    def _get_image_hashes_for_doc(self, doc_id: str) -> list[str]:
+        """
+        Collect image hashes from chunks.jsonl for a doc_id.
+        Must be called BEFORE chunks are deleted.
+        """
+        hashes = []
+        chunks_path = self.config.get("chunks_path", "data/chunks.jsonl")
+        
+        if not os.path.exists(chunks_path):
+            return hashes
+        
+        with open(chunks_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    chunk = json.loads(line)
+                    if chunk.get("doc_id") == doc_id:
+                        # Extract image_hash if present (image chunks have this)
+                        if chunk.get("type") in ("image_ocr", "image_caption"):
+                            # Hash from chunk_id: format is typically "doc_id_p{page}_img{idx}"
+                            # Store chunk_id for matching in cache
+                            hashes.append(chunk.get("chunk_id", ""))
+                except json.JSONDecodeError:
+                    continue
+        
+        return hashes
+    
+    def _cleanup_cache_for_doc(self, doc_id: str, image_hashes: list[str] = None) -> int:
         """
         Clean up cache files related to a doc_id on overwrite.
         Deletes cached OCR/vision files for images from that doc.
+        
+        Args:
+            doc_id: Document ID to clean caches for
+            image_hashes: List of image chunk_ids to match in caches (optional)
         """
         from pathlib import Path
         import shutil
+        import glob
         
         cleaned = 0
+        image_hashes = image_hashes or []
         
-        # Get image hashes from chunks before they were deleted (already deleted)
-        # So we clean by doc_id prefix in cache dirs
-        cache_dirs = [
-            self.config.get("ocr_cache_dir", "data/cache/ocr"),
-            self.config.get("vision_cache_dir", "data/cache/vision"),
-        ]
-        
-        # Clean images directory for this doc
+        # 1. Clean images directory for this doc
         images_dir = os.path.join(self.config.get("cache_dir", "data/cache"), "images")
         doc_images_dir = os.path.join(images_dir, doc_id)
         
@@ -501,8 +531,37 @@ class IngestionPipeline:
             except Exception as e:
                 logger.warning(f"Failed to clean images cache: {e}")
         
-        # Note: OCR/vision caches are keyed by image_hash not doc_id
-        # For full cleanup, we'd need to track image_hash -> doc_id mapping
-        # This is a partial solution - full cleanup requires image_hash tracking
+        # 2. Clean OCR cache files matching doc_id pattern
+        ocr_cache_dir = self.config.get("ocr_cache_dir", "data/cache/ocr")
+        if os.path.exists(ocr_cache_dir):
+            for cache_file in glob.glob(os.path.join(ocr_cache_dir, f"*{doc_id}*")):
+                try:
+                    os.remove(cache_file)
+                    cleaned += 1
+                except Exception as e:
+                    logger.warning(f"Failed to clean OCR cache {cache_file}: {e}")
+        
+        # 3. Clean Vision cache files matching doc_id pattern
+        vision_cache_dir = self.config.get("vision_cache_dir", "data/cache/vision")
+        if os.path.exists(vision_cache_dir):
+            for cache_file in glob.glob(os.path.join(vision_cache_dir, f"*{doc_id}*")):
+                try:
+                    os.remove(cache_file)
+                    cleaned += 1
+                except Exception as e:
+                    logger.warning(f"Failed to clean vision cache {cache_file}: {e}")
+        
+        # 4. Clean embedding cache entries for this doc
+        embedding_cache_dir = self.config.get("embedding_cache_dir", "data/cache/embeddings")
+        if os.path.exists(embedding_cache_dir):
+            for cache_file in glob.glob(os.path.join(embedding_cache_dir, f"*{doc_id}*")):
+                try:
+                    os.remove(cache_file)
+                    cleaned += 1
+                except Exception as e:
+                    logger.warning(f"Failed to clean embedding cache {cache_file}: {e}")
+        
+        if cleaned > 0:
+            logger.info(f"Cleaned {cleaned} cache files for doc_id={doc_id}")
         
         return cleaned
