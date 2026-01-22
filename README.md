@@ -131,13 +131,13 @@ xpanceo-db/
 - **Cost-efficient**: Vision API only used when OCR quality is low
 - **Transparent**: Clear criteria for OCR failure (confidence < 60, chars < 50, tokens < 10, alpha_ratio < 0.4)
 
-### Why FAISS over Qdrant?
+### Why FAISS?
 
 - **Simplicity**: Local file-based index, no server required
 - **Sufficient for MVP**: Up to 1M vectors on single machine
-- **Swappable**: Architecture supports backend switching
+- **Zero dependencies**: No external services
 
-> ⚠️ **Note**: Currently only FAISS is supported. Setting `index_backend: qdrant` will raise `NotImplementedError`. Qdrant support is planned for future releases.
+> ℹ️ **Note**: Only FAISS is supported. Other backends (e.g., Qdrant) are not implemented.
 
 ### Why No Rerankers/Agents?
 

@@ -83,24 +83,38 @@ class DatasetGenerator:
         chunks: list[Chunk],
         num_questions: int = 20,
         use_ragas: bool = True,
+        require_ragas: bool = False,  # If True, fail if RAGAS unavailable
     ) -> list[DatasetEntry]:
         """
         Generate overall questions from all chunks.
         Uses RAGAS TestsetGenerator if available, falls back to custom LLM.
+        
+        Args:
+            require_ragas: If True, raise error if RAGAS unavailable or fails
         """
         entries = []
+        ragas_error = None
         
         # Try RAGAS first if requested
         if use_ragas:
             try:
                 entries = self._generate_with_ragas(chunks, num_questions)
                 if entries:
-                    logger.info(f"Generated {len(entries)} questions via RAGAS")
+                    logger.info(f"✅ Generated {len(entries)} questions via RAGAS")
                     return entries
-            except ImportError:
-                logger.warning("⚠️ RAGAS UNAVAILABLE: ragas package not installed. Using custom LLM generator. Run: pip install ragas langchain-openai")
+            except ImportError as e:
+                ragas_error = f"RAGAS package not installed. Run: pip install ragas langchain-openai"
+                logger.warning(f"⚠️ RAGAS UNAVAILABLE: {ragas_error}")
             except Exception as e:
-                logger.warning(f"⚠️ RAGAS FAILED: {e}. Falling back to custom LLM generator.")
+                ragas_error = str(e)
+                logger.warning(f"⚠️ RAGAS FAILED: {e}")
+        
+        # Fail if RAGAS required but unavailable
+        if require_ragas:
+            raise RuntimeError(
+                f"RAGAS required but unavailable: {ragas_error or 'use_ragas=False'}. "
+                f"Install RAGAS: pip install ragas langchain-openai"
+            )
         
         # Fallback to custom LLM generation
         logger.warning("📝 Using custom LLM generator (not RAGAS) for dataset generation")

@@ -19,7 +19,7 @@ model_embed: text-embedding-3-small  # Embedding model (dim=1536)
 # =============================================================================
 # Index Backend
 # =============================================================================
-index_backend: faiss                 # faiss | qdrant
+index_backend: faiss                 # Only 'faiss' is supported
 top_k: 5                             # Number of chunks to retrieve
 
 # Hybrid retrieval (optional)

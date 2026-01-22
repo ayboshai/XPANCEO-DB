@@ -230,21 +230,17 @@ class FAISSIndex:
 
 def create_index(config: dict) -> "FAISSIndex":
     """
-    Factory function to create index from config.
-    Supports index_backend: faiss | qdrant
+    Factory function to create FAISS index from config.
+    
+    Only FAISS is supported. Any other backend will fail fast.
     """
     backend = config.get("index_backend", "faiss")
     
-    if backend == "qdrant":
-        from .index_qdrant import QdrantIndex
-        raise NotImplementedError(
-            "Qdrant backend not yet implemented. "
-            "Set index_backend: faiss in config/master_config.yaml"
-        )
-    elif backend != "faiss":
+    if backend != "faiss":
         raise ValueError(
-            f"Unknown index_backend: {backend}. "
-            f"Supported: faiss, qdrant"
+            f"Unsupported index_backend: '{backend}'. "
+            f"Only 'faiss' is supported. "
+            f"Set index_backend: faiss in config/master_config.yaml"
         )
     
     return FAISSIndex(

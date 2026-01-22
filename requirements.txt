@@ -12,7 +12,7 @@ PyPDF2>=3.0.0  # Fallback parser
 
 # Vector Index
 faiss-cpu>=1.7.4
-# qdrant-client>=1.7.0  # Optional: uncomment for Qdrant
+# (FAISS-only, no Qdrant support)
 
 # Embeddings & LLM
 tiktoken>=0.5.0  # Token counting
