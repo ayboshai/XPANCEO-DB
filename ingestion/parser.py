@@ -96,7 +96,7 @@ class PDFParser:
         
         elements = partition_pdf(
             filename=pdf_path,
-            strategy="hi_res",  # High resolution for better table/image extraction
+            strategy="auto",  # Balanced: detects tables/images, much faster than hi_res
             extract_images_in_pdf=True,
             extract_image_block_output_dir=doc_image_dir,
             include_page_breaks=True,

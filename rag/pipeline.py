@@ -111,17 +111,30 @@ def load_config(config_path: str = "config/master_config.yaml") -> dict:
     return config
 
 
-def create_rag_pipeline(config_path: str = "config/master_config.yaml") -> RAGPipeline:
+def create_rag_pipeline(
+    config_path: str = "config/master_config.yaml",
+    config_override: Optional[dict] = None,
+) -> RAGPipeline:
     """
     Create complete RAG pipeline from config.
     
     Args:
         config_path: Path to master_config.yaml
+        config_override: Optional dict to override config values (e.g., from UI)
+            Supported keys: model_chat, model_embed, top_k, hybrid_enabled,
+            api_rate_limit_rpm, api_max_retries, etc.
         
     Returns:
         Configured RAGPipeline instance
     """
     config = load_config(config_path)
+    
+    # Apply overrides from UI/caller
+    if config_override:
+        for key, value in config_override.items():
+            if value is not None:
+                config[key] = value
+                logger.debug(f"Config override: {key}={value}")
     
     # Load chunks from ingestion pipeline
     ingestion = IngestionPipeline(config)
@@ -139,3 +152,4 @@ def create_rag_pipeline(config_path: str = "config/master_config.yaml") -> RAGPi
         generator=generator,
         top_k=config.get("top_k", 5),
     )
+

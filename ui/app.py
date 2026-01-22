@@ -113,12 +113,22 @@ def init_session_state():
 
 
 def load_pipeline():
-    """Load RAG pipeline."""
+    """Load RAG pipeline with UI settings applied."""
     try:
         from rag.pipeline import create_rag_pipeline
         
+        # Collect settings from UI session_state
+        config_override = {
+            "model_chat": st.session_state.get("model_chat"),
+            "model_embed": st.session_state.get("model_embed"),
+            "top_k": st.session_state.get("top_k"),
+            "hybrid_enabled": st.session_state.get("hybrid_enabled"),
+            "api_rate_limit_rpm": st.session_state.get("rpm"),
+            "api_max_retries": st.session_state.get("max_retries"),
+        }
+        
         with st.spinner("🔄 Loading RAG pipeline..."):
-            pipeline = create_rag_pipeline()
+            pipeline = create_rag_pipeline(config_override=config_override)
             chunks_count = len(pipeline.retriever.chunks_lookup)
             
             st.session_state.rag_pipeline = pipeline
