@@ -292,14 +292,9 @@ Text:
 Respond in JSON format:
 {{"question": "...", "answer": "..."}}"""
 
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=300,
-        )
-        
-        result = response.choices[0].message.content.strip()
+        result = self._call_llm_with_retry(prompt)
+        if not result:
+            return None, None
         
         # Parse JSON
         try:
@@ -324,14 +319,9 @@ Table:
 Respond in JSON format:
 {{"question": "...", "answer": "..."}}"""
 
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=300,
-        )
-        
-        result = response.choices[0].message.content.strip()
+        result = self._call_llm_with_retry(prompt)
+        if not result:
+            return None, None
         
         try:
             if "```" in result:
@@ -353,14 +343,9 @@ Image content:
 Respond in JSON format:
 {{"question": "...", "answer": "..."}}"""
 
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=300,
-        )
-        
-        result = response.choices[0].message.content.strip()
+        result = self._call_llm_with_retry(prompt)
+        if not result:
+            return None, None
         
         try:
             if "```" in result:
