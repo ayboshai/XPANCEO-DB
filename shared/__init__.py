@@ -287,31 +287,31 @@ class SyncRateLimiter:
         self._vision_sem = threading.Semaphore(max_vision)
         self._judge_sem = threading.Semaphore(max_judge)
         
-        # RPM-based rate limiting
+        # RPM-based rate limiting - GLOBAL key to prevent total burst
+        # All API calls share one limit to prevent combined exceeding RPM
         self.rpm = self.config.get("api_rate_limit_rpm", 500)
         self._min_delay = 60.0 / self.rpm if self.rpm > 0 else 0
-        self._last_call: dict[str, float] = {}
+        self._last_api_call = 0.0  # Single global timestamp
         self._lock = threading.Lock()
     
-    def _wait_for_rate_limit(self, key: str) -> None:
-        """Wait if needed to respect rate limit."""
+    def _wait_for_rate_limit(self) -> None:
+        """Wait if needed to respect global rate limit (shared across all API types)."""
         if self._min_delay <= 0:
             return
         
         with self._lock:
             now = time.time()
-            last = self._last_call.get(key, 0)
-            elapsed = now - last
+            elapsed = now - self._last_api_call
             
             if elapsed < self._min_delay:
                 time.sleep(self._min_delay - elapsed)
             
-            self._last_call[key] = time.time()
+            self._last_api_call = time.time()
     
     def acquire_embedding(self) -> None:
         """Acquire embedding slot (blocks if at limit)."""
         self._embed_sem.acquire()
-        self._wait_for_rate_limit("embed")
+        self._wait_for_rate_limit()
     
     def release_embedding(self) -> None:
         """Release embedding slot."""
@@ -320,7 +320,7 @@ class SyncRateLimiter:
     def acquire_vision(self) -> None:
         """Acquire vision slot (blocks if at limit)."""
         self._vision_sem.acquire()
-        self._wait_for_rate_limit("vision")
+        self._wait_for_rate_limit()
     
     def release_vision(self) -> None:
         """Release vision slot."""
@@ -329,7 +329,7 @@ class SyncRateLimiter:
     def acquire_judge(self) -> None:
         """Acquire judge slot (blocks if at limit)."""
         self._judge_sem.acquire()
-        self._wait_for_rate_limit("judge")
+        self._wait_for_rate_limit()
     
     def release_judge(self) -> None:
         """Release judge slot."""

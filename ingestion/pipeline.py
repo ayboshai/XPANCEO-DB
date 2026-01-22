@@ -479,6 +479,9 @@ class IngestionPipeline:
         """
         Collect image hashes from chunks.jsonl for a doc_id.
         Must be called BEFORE chunks are deleted.
+        
+        Returns:
+            List of md5 image hashes used for OCR/vision cache filenames.
         """
         hashes = []
         chunks_path = self.config.get("chunks_path", "data/chunks.jsonl")
@@ -493,28 +496,31 @@ class IngestionPipeline:
                 try:
                     chunk = json.loads(line)
                     if chunk.get("doc_id") == doc_id:
-                        # Extract image_hash if present (image chunks have this)
-                        if chunk.get("type") in ("image_ocr", "image_caption"):
-                            # Hash from chunk_id: format is typically "doc_id_p{page}_img{idx}"
-                            # Store chunk_id for matching in cache
-                            hashes.append(chunk.get("chunk_id", ""))
+                        # Extract actual image_hash from metadata (md5 of image file)
+                        metadata = chunk.get("metadata", {})
+                        image_hash = metadata.get("image_hash")
+                        if image_hash:
+                            hashes.append(image_hash)
+                            logger.debug(f"Found image_hash={image_hash} for doc_id={doc_id}")
                 except json.JSONDecodeError:
                     continue
+        
+        if hashes:
+            logger.info(f"Collected {len(hashes)} image hashes for doc_id={doc_id}")
         
         return hashes
     
     def _cleanup_cache_for_doc(self, doc_id: str, image_hashes: list[str] = None) -> int:
         """
         Clean up cache files related to a doc_id on overwrite.
-        Deletes cached OCR/vision files for images from that doc.
+        Deletes cached OCR/vision files by image_hash (md5).
         
         Args:
             doc_id: Document ID to clean caches for
-            image_hashes: List of image chunk_ids to match in caches (optional)
+            image_hashes: List of md5 image hashes for OCR/vision cache cleanup
         """
         from pathlib import Path
         import shutil
-        import glob
         
         cleaned = 0
         image_hashes = image_hashes or []
@@ -531,37 +537,43 @@ class IngestionPipeline:
             except Exception as e:
                 logger.warning(f"Failed to clean images cache: {e}")
         
-        # 2. Clean OCR cache files matching doc_id pattern
+        # 2. Clean OCR cache files by image_hash
         ocr_cache_dir = self.config.get("ocr_cache_dir", "data/cache/ocr")
-        if os.path.exists(ocr_cache_dir):
-            for cache_file in glob.glob(os.path.join(ocr_cache_dir, f"*{doc_id}*")):
-                try:
-                    os.remove(cache_file)
-                    cleaned += 1
-                except Exception as e:
-                    logger.warning(f"Failed to clean OCR cache {cache_file}: {e}")
+        if os.path.exists(ocr_cache_dir) and image_hashes:
+            for img_hash in image_hashes:
+                # OCR cache files are named: {image_hash}.json
+                for ext in [".json", ".txt"]:
+                    cache_file = os.path.join(ocr_cache_dir, f"{img_hash}{ext}")
+                    if os.path.exists(cache_file):
+                        try:
+                            os.remove(cache_file)
+                            logger.debug(f"Removed OCR cache: {cache_file}")
+                            cleaned += 1
+                        except Exception as e:
+                            logger.warning(f"Failed to clean OCR cache {cache_file}: {e}")
         
-        # 3. Clean Vision cache files matching doc_id pattern
+        # 3. Clean Vision cache files by image_hash
         vision_cache_dir = self.config.get("vision_cache_dir", "data/cache/vision")
-        if os.path.exists(vision_cache_dir):
-            for cache_file in glob.glob(os.path.join(vision_cache_dir, f"*{doc_id}*")):
-                try:
-                    os.remove(cache_file)
-                    cleaned += 1
-                except Exception as e:
-                    logger.warning(f"Failed to clean vision cache {cache_file}: {e}")
+        if os.path.exists(vision_cache_dir) and image_hashes:
+            for img_hash in image_hashes:
+                # Vision cache files are named: {image_hash}.txt
+                for ext in [".txt", ".json"]:
+                    cache_file = os.path.join(vision_cache_dir, f"{img_hash}{ext}")
+                    if os.path.exists(cache_file):
+                        try:
+                            os.remove(cache_file)
+                            logger.debug(f"Removed vision cache: {cache_file}")
+                            cleaned += 1
+                        except Exception as e:
+                            logger.warning(f"Failed to clean vision cache {cache_file}: {e}")
         
-        # 4. Clean embedding cache entries for this doc
-        embedding_cache_dir = self.config.get("embedding_cache_dir", "data/cache/embeddings")
-        if os.path.exists(embedding_cache_dir):
-            for cache_file in glob.glob(os.path.join(embedding_cache_dir, f"*{doc_id}*")):
-                try:
-                    os.remove(cache_file)
-                    cleaned += 1
-                except Exception as e:
-                    logger.warning(f"Failed to clean embedding cache {cache_file}: {e}")
+        # Note: Embedding cache uses md5(model:text), not doc_id
+        # Full embedding cache cleanup would require text->hash mapping
+        # For now, new ingest will create new cache entries with new hashes
         
         if cleaned > 0:
-            logger.info(f"Cleaned {cleaned} cache files for doc_id={doc_id}")
+            logger.info(f"Cleaned {cleaned} cache files for doc_id={doc_id} ({len(image_hashes)} hashes)")
+        elif image_hashes:
+            logger.debug(f"No cache files found for {len(image_hashes)} image hashes")
         
         return cleaned
