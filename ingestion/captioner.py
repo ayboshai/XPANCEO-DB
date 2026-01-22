@@ -65,7 +65,7 @@ class VisionCaptioner:
         if cache_dir:
             os.makedirs(cache_dir, exist_ok=True)
     
-    def run(self, image_path: str) -> tuple[str, bool]:
+    def run(self, image_path: str) -> Tuple[str, bool]:
         """
         Generate caption for image.
         

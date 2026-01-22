@@ -48,7 +48,7 @@ class EvalMetrics:
     """Complete evaluation metrics."""
     
     overall: SliceMetrics = field(default_factory=lambda: SliceMetrics("overall"))
-    by_slice: dict[str, SliceMetrics] = field(default_factory=dict)
+    by_slice: Dict[str, SliceMetrics] = field(default_factory=dict)
     
     # Counts
     total_questions: int = 0
@@ -57,8 +57,8 @@ class EvalMetrics:
 
 
 def calculate_metrics(
-    judge_responses: list[JudgeResponse],
-    predictions_slices: Optional[dict[str, str]] = None,
+    judge_responses: List[JudgeResponse],
+    predictions_slices: Optional[Dict[str, str]] = None,
 ) -> EvalMetrics:
     """
     Calculate metrics from judge responses.
@@ -74,7 +74,7 @@ def calculate_metrics(
     metrics.total_questions = len(judge_responses)
     
     # Group by slice
-    slice_groups: dict[str, list[JudgeResponse]] = {
+    slice_groups: Dict[str, List[JudgeResponse]] = {
         "overall": [],
         "table": [],
         "image": [],
@@ -114,7 +114,7 @@ def calculate_metrics(
     return metrics
 
 
-def _calculate_slice_metrics(slice_name: str, responses: list[JudgeResponse]) -> SliceMetrics:
+def _calculate_slice_metrics(slice_name: str, responses: List[JudgeResponse]) -> SliceMetrics:
     """Calculate metrics for a single slice."""
     n = len(responses)
     if n == 0:

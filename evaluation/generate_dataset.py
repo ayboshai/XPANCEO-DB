@@ -11,7 +11,7 @@ import os
 import random
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Tuple, Dict,  Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -80,11 +80,11 @@ class DatasetGenerator:
     
     def generate_overall(
         self,
-        chunks: list[Chunk],
+        chunks: List[Chunk],
         num_questions: int = 20,
         use_ragas: bool = True,
         require_ragas: bool = False,  # If True, fail if RAGAS unavailable
-    ) -> list[DatasetEntry]:
+    ) -> List[DatasetEntry]:
         """
         Generate overall questions from all chunks.
         Uses RAGAS TestsetGenerator if available, falls back to custom LLM.
@@ -143,7 +143,7 @@ class DatasetGenerator:
         
         return entries
     
-    def _generate_with_ragas(self, chunks: list[Chunk], num_questions: int) -> list[DatasetEntry]:
+    def _generate_with_ragas(self, chunks: List[Chunk], num_questions: int) -> List[DatasetEntry]:
         """Generate questions using RAGAS TestsetGenerator."""
         from ragas.testset.generator import TestsetGenerator
         from ragas.testset.evolutions import simple, reasoning, multi_context
@@ -200,9 +200,9 @@ class DatasetGenerator:
     
     def generate_table_slice(
         self,
-        chunks: list[Chunk],
+        chunks: List[Chunk],
         num_questions: int = 10,
-    ) -> list[DatasetEntry]:
+    ) -> List[DatasetEntry]:
         """Generate questions specifically about tables."""
         table_chunks = [c for c in chunks if c.type == "table"]
         
@@ -231,9 +231,9 @@ class DatasetGenerator:
     
     def generate_image_slice(
         self,
-        chunks: list[Chunk],
+        chunks: List[Chunk],
         num_questions: int = 10,
-    ) -> list[DatasetEntry]:
+    ) -> List[DatasetEntry]:
         """Generate questions about images."""
         image_chunks = [c for c in chunks if c.type in ("image_ocr", "image_caption")]
         
@@ -263,7 +263,7 @@ class DatasetGenerator:
     def generate_no_answer_slice(
         self,
         num_questions: int = 10,
-    ) -> list[DatasetEntry]:
+    ) -> List[DatasetEntry]:
         """Generate questions that should NOT be answerable from the documents."""
         no_answer_prompts = [
             "What is the current stock price of Apple?",
@@ -295,7 +295,7 @@ class DatasetGenerator:
         
         return entries
     
-    def _generate_qa_pair(self, chunk: Chunk) -> tuple[Optional[str], Optional[str]]:
+    def _generate_qa_pair(self, chunk: Chunk) -> Tuple[Optional[str], Optional[str]]:
         """Generate question-answer pair from chunk content."""
         prompt = f"""Based on the following text, generate a single factual question and its correct answer.
 The question should be answerable ONLY from this text.
@@ -323,7 +323,7 @@ Respond in JSON format:
         except json.JSONDecodeError:
             return None, None
     
-    def _generate_table_question(self, chunk: Chunk) -> tuple[Optional[str], Optional[str]]:
+    def _generate_table_question(self, chunk: Chunk) -> Tuple[Optional[str], Optional[str]]:
         """Generate question about table content."""
         prompt = f"""Based on this table, generate a question that requires reading specific data from the table.
 
@@ -347,7 +347,7 @@ Respond in JSON format:
         except json.JSONDecodeError:
             return None, None
     
-    def _generate_image_question(self, chunk: Chunk) -> tuple[Optional[str], Optional[str]]:
+    def _generate_image_question(self, chunk: Chunk) -> Tuple[Optional[str], Optional[str]]:
         """Generate question about image content."""
         prompt = f"""Based on this image description/OCR text, generate a question about what the image shows.
 
@@ -373,14 +373,14 @@ Respond in JSON format:
     
     def generate_full_dataset(
         self,
-        chunks: list[Chunk],
+        chunks: List[Chunk],
         overall_count: int = 20,
         table_count: int = 10,
         image_count: int = 10,
         no_answer_count: int = 10,
         min_ratio: float = 0.5,  # Warn if less than 50% of target achieved
         strict: bool = False,  # If True, raise error when slices below min_ratio
-    ) -> list[DatasetEntry]:
+    ) -> List[DatasetEntry]:
         """
         Generate complete dataset with all slices.
         Logs warnings if target counts not achieved.
@@ -435,7 +435,7 @@ Respond in JSON format:
         return entries
 
 
-def save_dataset(entries: list[DatasetEntry], output_path: str) -> None:
+def save_dataset(entries: List[DatasetEntry], output_path: str) -> None:
     """Save dataset to JSONL file."""
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
@@ -446,7 +446,7 @@ def save_dataset(entries: list[DatasetEntry], output_path: str) -> None:
     logger.info(f"Saved {len(entries)} entries to {output_path}")
 
 
-def load_dataset(input_path: str) -> list[DatasetEntry]:
+def load_dataset(input_path: str) -> List[DatasetEntry]:
     """Load dataset from JSONL file."""
     entries = []
     with open(input_path, "r", encoding="utf-8") as f:

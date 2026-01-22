@@ -10,7 +10,7 @@ import logging
 import os
 import pickle
 from pathlib import Path
-from typing import Optional
+from typing import List, Tuple, Dict,  Optional
 
 import numpy as np
 
@@ -32,8 +32,8 @@ class FAISSIndex:
         self.dimension = dimension
         
         self._index = None
-        self._metadata: dict[str, dict] = {}  # chunk_id -> metadata
-        self._id_map: list[str] = []  # position -> chunk_id
+        self._metadata: Dict[str, dict] = {}  # chunk_id -> metadata
+        self._id_map: List[str] = []  # position -> chunk_id
         
         os.makedirs(index_dir, exist_ok=True)
         
@@ -56,9 +56,9 @@ class FAISSIndex:
     
     def upsert(
         self,
-        ids: list[str],
-        vectors: list[list[float]],
-        metadata: list[dict],
+        ids: List[str],
+        vectors: List[List[float]],
+        metadata: List[dict],
     ) -> None:
         """
         Insert or update vectors with metadata.
@@ -99,9 +99,9 @@ class FAISSIndex:
     
     def search(
         self,
-        vector: list[float],
+        vector: List[float],
         top_k: int = 5,
-    ) -> list[tuple[str, float, dict]]:
+    ) -> List[Tuple[str, float, dict]]:
         """
         Search for similar vectors.
         
@@ -134,7 +134,7 @@ class FAISSIndex:
         
         return results
     
-    def delete(self, ids: list[str]) -> None:
+    def delete(self, ids: List[str]) -> None:
         """Delete vectors by ID."""
         self._remove_ids(set(ids))
         self._save()

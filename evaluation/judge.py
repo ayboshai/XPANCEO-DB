@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import sys
-from typing import Optional
+from typing import List, Tuple, Dict,  Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -216,11 +216,11 @@ class LLMJudge:
     
     def judge_all(
         self,
-        predictions: list[PredictionEntry],
-        dataset: Optional[list[DatasetEntry]] = None,
+        predictions: List[PredictionEntry],
+        dataset: Optional[List[DatasetEntry]] = None,
         output_dir: Optional[str] = None,
         show_progress: bool = True,
-    ) -> list[JudgeResponse]:
+    ) -> List[JudgeResponse]:
         """
         Judge all predictions.
         

@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime
-from typing import Iterator, Optional
+from typing import List, Tuple, Dict,  Iterator, Optional
 
 from .models import Chunk, ChunkMetadata
 from .parser import Element
@@ -41,10 +41,10 @@ class Chunker:
     
     def chunk(
         self,
-        elements: list[Element],
+        elements: List[Element],
         doc_id: str,
         source_path: str,
-    ) -> list[Chunk]:
+    ) -> List[Chunk]:
         """
         Convert elements to chunks with linking.
         
@@ -56,10 +56,10 @@ class Chunker:
         Returns:
             List of Chunk objects with prev/next links
         """
-        chunks: list[Chunk] = []
+        chunks: List[Chunk] = []
         
         # Group elements by page for chunk ID generation
-        page_counters: dict[int, dict[str, int]] = {}
+        page_counters: Dict[int, Dict[str, int]] = {}
         
         for element in elements:
             page = element.page
@@ -185,7 +185,7 @@ class Chunker:
         if current:
             yield " ".join(current)
     
-    def _get_overlap_text(self, chunks: list[str]) -> str:
+    def _get_overlap_text(self, chunks: List[str]) -> str:
         """Get overlap text from end of chunks."""
         if not chunks:
             return ""
@@ -200,7 +200,7 @@ class Chunker:
         
         return " ".join(words[-overlap_words:])
     
-    def _link_chunks(self, chunks: list[Chunk]) -> list[Chunk]:
+    def _link_chunks(self, chunks: List[Chunk]) -> List[Chunk]:
         """Add prev/next chunk links."""
         for i, chunk in enumerate(chunks):
             if i > 0:
@@ -222,7 +222,7 @@ class Chunker:
         image_hash: str,
         source_path: str,
         config: Optional[dict] = None,
-    ) -> list[Chunk]:
+    ) -> List[Chunk]:
         """
         Create image-related chunks (OCR and optionally caption).
         

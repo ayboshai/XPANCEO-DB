@@ -10,7 +10,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Iterator, Optional
+from typing import List, Tuple, Dict,  Callable, Iterator, Optional
 
 from .captioner import VisionCaptioner
 from .chunker import Chunker
@@ -74,7 +74,7 @@ class IngestionPipeline:
         self,
         folder_path: str,
         progress_callback: Optional[Callable[[str, int, int], None]] = None,
-    ) -> list[RegistryEntry]:
+    ) -> List[RegistryEntry]:
         """
         Ingest all PDFs from a folder.
         
@@ -150,7 +150,7 @@ class IngestionPipeline:
                 doc_id = new_hash
         
         # Process elements to chunks
-        all_chunks: list[Chunk] = []
+        all_chunks: List[Chunk] = []
         image_count = 0
         ocr_failures = 0
         vision_calls = 0
@@ -245,7 +245,7 @@ class IngestionPipeline:
         image_index: int,
         image_path: str,
         source_path: str,
-    ) -> list[Chunk]:
+    ) -> List[Chunk]:
         """Process single image: OCR + optional Vision fallback."""
         image_hash = compute_image_hash(image_path)
         
@@ -275,7 +275,7 @@ class IngestionPipeline:
             config=self.config,
         )
     
-    def _embed_and_index(self, chunks: list[Chunk]) -> None:
+    def _embed_and_index(self, chunks: List[Chunk]) -> None:
         """Embed chunks and add to index."""
         if not chunks:
             return
@@ -313,7 +313,7 @@ class IngestionPipeline:
             logger.error(f"Failed to embed/index chunks: {e}")
             raise
     
-    def _save_chunks(self, chunks: list[Chunk]) -> None:
+    def _save_chunks(self, chunks: List[Chunk]) -> None:
         """Append chunks to chunks.jsonl."""
         with open(self.chunks_file, "a", encoding="utf-8") as f:
             for chunk in chunks:
@@ -345,7 +345,7 @@ class IngestionPipeline:
         with open(self.error_log_file, "a", encoding="utf-8") as f:
             f.write(entry.to_jsonl() + "\n")
     
-    def load_chunks(self) -> list[Chunk]:
+    def load_chunks(self) -> List[Chunk]:
         """Load all chunks from chunks.jsonl."""
         chunks = []
         if os.path.exists(self.chunks_file):
@@ -475,7 +475,7 @@ class IngestionPipeline:
         """Deprecated: Use _remove_from_index_by_doc_id instead."""
         return self._remove_from_index_by_doc_id(doc_id)
     
-    def _get_image_hashes_for_doc(self, doc_id: str) -> list[str]:
+    def _get_image_hashes_for_doc(self, doc_id: str) -> List[str]:
         """
         Collect image hashes from chunks.jsonl for a doc_id.
         Must be called BEFORE chunks are deleted.
@@ -510,7 +510,7 @@ class IngestionPipeline:
         
         return hashes
     
-    def _cleanup_cache_for_doc(self, doc_id: str, image_hashes: list[str] = None) -> int:
+    def _cleanup_cache_for_doc(self, doc_id: str, image_hashes: List[str] = None) -> int:
         """
         Clean up cache files related to a doc_id on overwrite.
         Deletes cached OCR/vision files by image_hash (md5).
@@ -567,12 +567,24 @@ class IngestionPipeline:
                         except Exception as e:
                             logger.warning(f"Failed to clean vision cache {cache_file}: {e}")
         
-        # Note: Embedding cache uses md5(model:text), not doc_id
-        # Full embedding cache cleanup would require text->hash mapping
-        # For now, new ingest will create new cache entries with new hashes
+        # 4. Clean embedding cache for this doc
+        # Policy: wipe all embeddings for consistency (conservative approach)
+        # Embeddings use md5(model:text), so we cannot selectively delete
+        # On overwrite, we clear entire embedding cache dir for this doc
+        embedding_cache_dir = self.config.get("embedding_cache_dir", "data/cache/embeddings")
+        if os.path.exists(embedding_cache_dir):
+            # Full wipe on overwrite (conservative policy)
+            import shutil
+            try:
+                shutil.rmtree(embedding_cache_dir)
+                os.makedirs(embedding_cache_dir, exist_ok=True)
+                logger.info(f"Wiped embedding cache directory on overwrite for doc_id={doc_id}")
+                cleaned += 1
+            except Exception as e:
+                logger.warning(f"Failed to wipe embedding cache: {e}")
         
         if cleaned > 0:
-            logger.info(f"Cleaned {cleaned} cache files for doc_id={doc_id} ({len(image_hashes)} hashes)")
+            logger.info(f"Cleaned {cleaned} cache items for doc_id={doc_id} ({len(image_hashes)} image hashes)")
         elif image_hashes:
             logger.debug(f"No cache files found for {len(image_hashes)} image hashes")
         

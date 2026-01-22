@@ -33,10 +33,10 @@ class EvalRunner:
     
     def run(
         self,
-        dataset: list[DatasetEntry],
+        dataset: List[DatasetEntry],
         output_dir: str,
         show_progress: bool = True,
-    ) -> list[PredictionEntry]:
+    ) -> List[PredictionEntry]:
         """
         Run evaluation on dataset.
         
@@ -95,7 +95,7 @@ def run_evaluation(
     dataset_path: str,
     output_dir: Optional[str] = None,
     config_path: str = "config/master_config.yaml",
-) -> list[PredictionEntry]:
+) -> List[PredictionEntry]:
     """
     Run full evaluation pipeline.
     

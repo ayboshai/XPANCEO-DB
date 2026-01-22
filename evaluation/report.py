@@ -43,9 +43,9 @@ def generate_csv_report(
 
 def generate_markdown_report(
     metrics: EvalMetrics,
-    judge_responses: list[JudgeResponse],
-    predictions: Optional[list[PredictionEntry]] = None,
-    dataset: Optional[list[DatasetEntry]] = None,
+    judge_responses: List[JudgeResponse],
+    predictions: Optional[List[PredictionEntry]] = None,
+    dataset: Optional[List[DatasetEntry]] = None,
     output_path: str = "report.md",
 ) -> None:
     """Generate detailed Markdown report."""
@@ -164,11 +164,11 @@ def generate_markdown_report(
 
 def generate_reports(
     metrics: EvalMetrics,
-    judge_responses: list[JudgeResponse],
+    judge_responses: List[JudgeResponse],
     output_dir: str,
-    predictions: Optional[list[PredictionEntry]] = None,
-    dataset: Optional[list[DatasetEntry]] = None,
-) -> tuple[str, str]:
+    predictions: Optional[List[PredictionEntry]] = None,
+    dataset: Optional[List[DatasetEntry]] = None,
+) -> Tuple[str, str]:
     """
     Generate both CSV and Markdown reports.
     

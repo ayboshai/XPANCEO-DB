@@ -11,7 +11,7 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Literal, Optional
+from typing import List, Tuple, Dict,  Iterator, Literal, Optional
 
 from PIL import Image
 
@@ -26,7 +26,7 @@ class Element:
     content: str  # Text content or table markdown
     page: int
     image_path: Optional[str] = None  # Path to saved image file
-    bbox: Optional[list[float]] = None
+    bbox: Optional[List[float]] = None
     
     
 def generate_doc_id(filepath: str, strategy: str = "hash") -> str:
@@ -62,7 +62,7 @@ class PDFParser:
         self.doc_id_strategy = doc_id_strategy
         os.makedirs(self.image_output_dir, exist_ok=True)
     
-    def parse(self, pdf_path: str) -> tuple[str, list[Element]]:
+    def parse(self, pdf_path: str) -> Tuple[str, List[Element]]:
         """
         Parse PDF and return (doc_id, list of elements).
         Tries Unstructured first, falls back to PyPDF2 for text-only.

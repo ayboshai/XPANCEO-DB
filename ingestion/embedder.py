@@ -12,7 +12,7 @@ import os
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, Protocol
+from typing import List, Tuple, Dict,  Optional, Protocol
 
 import numpy as np
 
@@ -22,11 +22,11 @@ logger = logging.getLogger(__name__)
 class EmbeddingProvider(Protocol):
     """Protocol for embedding providers."""
     
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: List[str]) -> List[List[float]]:
         """Embed list of texts, return list of vectors."""
         ...
     
-    def embed_single(self, text: str) -> list[float]:
+    def embed_single(self, text: str) -> List[float]:
         """Embed single text, return vector."""
         ...
 
@@ -75,7 +75,7 @@ class OpenAIEmbedder:
             self._client = OpenAI(api_key=self.api_key)
         return self._client
     
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: List[str]) -> List[List[float]]:
         """
         Embed list of texts.
         Uses cache for previously embedded texts.
@@ -106,12 +106,12 @@ class OpenAIEmbedder:
         
         return results
     
-    def embed_single(self, text: str) -> list[float]:
+    def embed_single(self, text: str) -> List[float]:
         """Embed single text."""
         results = self.embed([text])
         return results[0] if results else []
     
-    def _embed_with_retry(self, texts: list[str]) -> list[list[float]]:
+    def _embed_with_retry(self, texts: List[str]) -> List[List[float]]:
         """Embed texts with retry logic, rate limiting, and concurrency control."""
         from shared import get_sync_limiter
         limiter = get_sync_limiter()
@@ -153,7 +153,7 @@ class OpenAIEmbedder:
         content = f"{self.model}:{text}"
         return hashlib.md5(content.encode()).hexdigest()
     
-    def _get_cached(self, text: str) -> Optional[list[float]]:
+    def _get_cached(self, text: str) -> Optional[List[float]]:
         """Get cached embedding if exists."""
         if not self.cache_dir:
             return None
@@ -167,7 +167,7 @@ class OpenAIEmbedder:
                 return None
         return None
     
-    def _save_cache(self, text: str, embedding: list[float]) -> None:
+    def _save_cache(self, text: str, embedding: List[float]) -> None:
         """Save embedding to cache."""
         if not self.cache_dir:
             return
@@ -191,10 +191,10 @@ class GeminiEmbedder:
         self.model = model
         raise NotImplementedError("Gemini embedder not yet implemented. Use OpenAI.")
     
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: List[str]) -> List[List[float]]:
         raise NotImplementedError()
     
-    def embed_single(self, text: str) -> list[float]:
+    def embed_single(self, text: str) -> List[float]:
         raise NotImplementedError()
 
 

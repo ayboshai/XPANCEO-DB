@@ -8,7 +8,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Tuple, Dict,  Optional
 
 from ingestion.models import ScoredChunk, SourceRef
 
@@ -38,7 +38,7 @@ class GeneratorResponse:
     """Response from the generator."""
     
     answer: str
-    sources: list[SourceRef]
+    sources: List[SourceRef]
     has_answer: bool
 
 
@@ -75,7 +75,7 @@ class Generator:
     def generate(
         self,
         query: str,
-        context_chunks: list[ScoredChunk],
+        context_chunks: List[ScoredChunk],
     ) -> GeneratorResponse:
         """
         Generate answer for query using context chunks.
@@ -113,7 +113,7 @@ class Generator:
             has_answer=has_answer,
         )
     
-    def _build_context(self, chunks: list[ScoredChunk]) -> str:
+    def _build_context(self, chunks: List[ScoredChunk]) -> str:
         """Build context string from chunks with metadata."""
         context_parts = []
         

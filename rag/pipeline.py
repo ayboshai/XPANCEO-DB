@@ -26,8 +26,8 @@ class RAGResponse:
     
     question: str
     answer: str
-    sources: list[SourceRef]
-    retrieved_chunks: list[SourceRef]
+    sources: List[SourceRef]
+    retrieved_chunks: List[SourceRef]
     has_answer: bool
     
     def to_prediction_entry(self, slice_name: str = "overall") -> PredictionEntry:
@@ -87,7 +87,7 @@ class RAGPipeline:
             has_answer=response.has_answer,
         )
     
-    def batch_query(self, questions: list[str]) -> list[RAGResponse]:
+    def batch_query(self, questions: List[str]) -> List[RAGResponse]:
         """Answer multiple questions."""
         return [self.query(q) for q in questions]
 

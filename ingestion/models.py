@@ -6,7 +6,7 @@ All data contracts defined here - single source of truth for schemas.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -18,7 +18,7 @@ class ChunkMetadata(BaseModel):
     """Metadata for a chunk - tracks source, OCR status, linking."""
     
     source_path: Optional[str] = None
-    bbox: Optional[list[float]] = None
+    bbox: Optional[List[float]] = None
     image_hash: Optional[str] = None
     ocr_confidence: Optional[float] = None
     ocr_failed: bool = False
@@ -195,8 +195,8 @@ class PredictionEntry(BaseModel):
     
     question: str
     answer: str
-    sources: list[SourceRef]
-    retrieved_chunks: list[SourceRef]
+    sources: List[SourceRef]
+    retrieved_chunks: List[SourceRef]
     slice: str
     has_answer_pred: bool
     

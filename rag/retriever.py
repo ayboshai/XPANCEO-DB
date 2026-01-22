@@ -24,7 +24,7 @@ class Retriever:
         self,
         embedder: OpenAIEmbedder,
         index: FAISSIndex,
-        chunks_lookup: dict[str, Chunk],  # chunk_id -> Chunk
+        chunks_lookup: Dict[str, Chunk],  # chunk_id -> Chunk
         top_k: int = 5,
         hybrid_enabled: bool = False,
     ):
@@ -56,7 +56,7 @@ class Retriever:
             logger.warning("rank-bm25 not installed. Hybrid search disabled.")
             self._bm25 = None
     
-    def search(self, query: str, top_k: Optional[int] = None) -> list[ScoredChunk]:
+    def search(self, query: str, top_k: Optional[int] = None) -> List[ScoredChunk]:
         """
         Search for relevant chunks.
         
@@ -74,7 +74,7 @@ class Retriever:
         dense_results = self.index.search(query_vector, k * 2 if self.hybrid_enabled else k)
         
         # Convert to ScoredChunk
-        scored_chunks: dict[str, ScoredChunk] = {}
+        scored_chunks: Dict[str, ScoredChunk] = {}
         
         for chunk_id, score, meta in dense_results:
             chunk = self.chunks_lookup.get(chunk_id)
@@ -103,7 +103,7 @@ class Retriever:
         
         return results[:k]
     
-    def _search_bm25(self, query: str, top_k: int) -> list[tuple[str, float]]:
+    def _search_bm25(self, query: str, top_k: int) -> List[Tuple[str, float]]:
         """BM25 search."""
         if not self._bm25:
             return []
@@ -125,7 +125,7 @@ class Retriever:
         return results
 
 
-def create_retriever(config: dict, chunks: list[Chunk]) -> Retriever:
+def create_retriever(config: dict, chunks: List[Chunk]) -> Retriever:
     """Factory function to create retriever from config."""
     embedder = create_embedder(config)
     index = create_index(config)
