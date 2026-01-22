@@ -104,6 +104,8 @@ def init_session_state():
         "hybrid_enabled": False,
         "reupload_policy": "overwrite",
         "ocr_threshold": 60,
+        "chunk_size": 1000,
+        "chunk_overlap": 200,
         "rpm": 500,
         "max_retries": 3,
     }
@@ -141,11 +143,11 @@ def load_pipeline():
 
 
 def run_ingestion(pdf_folder: str):
-    """Run ingestion on PDF folder."""
+    """Run ingestion on PDF folder with UI settings applied."""
     import yaml
     from ingestion.pipeline import IngestionPipeline
     
-    # Load config
+    # Load base config
     config_path = "config/master_config.yaml"
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
@@ -154,6 +156,21 @@ def run_ingestion(pdf_folder: str):
     for key, value in config.items():
         if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
             config[key] = os.getenv(value[2:-1], "")
+    
+    # Apply UI settings to ingestion config
+    ui_ingestion_settings = {
+        "reupload_policy": st.session_state.get("reupload_policy"),
+        "ocr_confidence_threshold": st.session_state.get("ocr_threshold"),
+        "chunk_size": st.session_state.get("chunk_size"),
+        "chunk_overlap": st.session_state.get("chunk_overlap"),
+        "model_embed": st.session_state.get("model_embed"),
+        "api_rate_limit_rpm": st.session_state.get("rpm"),
+        "api_max_retries": st.session_state.get("max_retries"),
+    }
+    
+    for key, value in ui_ingestion_settings.items():
+        if value is not None:
+            config[key] = value
     
     pipeline = IngestionPipeline(config)
     
@@ -324,6 +341,18 @@ def render_sidebar():
                 "OCR Confidence Threshold",
                 min_value=0, max_value=100, value=st.session_state.ocr_threshold,
                 help="Below threshold, Vision API is used"
+            )
+            st.session_state.chunk_size = st.slider(
+                "Chunk Size",
+                min_value=200, max_value=2000, value=st.session_state.chunk_size,
+                step=100,
+                help="Max characters per chunk"
+            )
+            st.session_state.chunk_overlap = st.slider(
+                "Chunk Overlap",
+                min_value=0, max_value=500, value=st.session_state.chunk_overlap,
+                step=50,
+                help="Overlap between chunks for context continuity"
             )
         
         with st.expander("⚡ Rate Limits", expanded=False):
