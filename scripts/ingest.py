@@ -50,7 +50,7 @@ def load_config(config_path: str = "config/master_config.yaml") -> dict:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Ingest PDF documents into XPANCEO DB",
+        description="Ingest PDF documents into XPANCEO DATABASE",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

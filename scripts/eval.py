@@ -42,7 +42,7 @@ def load_config(config_path: str = "config/master_config.yaml") -> dict:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Run evaluation on XPANCEO DB RAG system",
+        description="Run evaluation on XPANCEO DATABASE RAG system",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

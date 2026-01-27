@@ -47,7 +47,7 @@ def format_response(response):
 def interactive_mode(rag_pipeline):
     """Run interactive chat session."""
     print("\n" + "=" * 50)
-    print("🤖 XPANCEO DB Chat")
+    print("🤖 XPANCEO DATABASE Chat")
     print("=" * 50)
     print("Type your questions. Enter 'quit' or 'exit' to end.")
     print()

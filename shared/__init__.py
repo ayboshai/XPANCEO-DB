@@ -1,5 +1,5 @@
 """
-Shared utilities for XPANCEO DB.
+Shared utilities for XPANCEO DATABASE.
 Configuration loading, OCR quality checking, retry decorator.
 """
 

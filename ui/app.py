@@ -1,5 +1,5 @@
 """
-XPANCEO DB - Streamlit UI
+XPANCEO DATABASE - Streamlit UI
 Modern chat interface for PDF Q&A with source visualization.
 Enhanced with Settings and Status panels.
 """
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Page config - must be first Streamlit command
 st.set_page_config(
-    page_title="XPANCEO DB",
+    page_title="XPANCEO DATABASE",
     page_icon="🔮",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -602,6 +602,15 @@ def run_ingestion(pdf_folder: str, config_path: Optional[str] = None):
             label = stage_labels.get(stage, stage)
             stage_progress.progress(stage_idx / max(stage_total, 1))
             stage_text.text(f"Stage {stage_idx}/{stage_total}: {label}")
+            # Update ETA during the current PDF based on stage progress.
+            elapsed = time.time() - start_time
+            pdf_progress_ratio = (stage_idx / max(stage_total, 1)) if total_pdfs else 0.0
+            overall_progress = ((i - 1) + pdf_progress_ratio) / max(total_pdfs, 1)
+            if overall_progress > 0:
+                remaining = elapsed * (1 / overall_progress - 1)
+            else:
+                remaining = 0
+            time_text.text(f"Elapsed: {format_duration(elapsed)} | ETA: {format_duration(remaining)}")
 
         try:
             entry = pipeline.ingest_pdf(str(pdf_path), stage_callback=stage_callback)
@@ -1191,7 +1200,7 @@ def main():
     init_session_state()
     
     # Header
-    st.title("🔮 XPANCEO DB")
+    st.title("🔮 XPANCEO DATABASE")
     st.markdown("*Multimodal RAG for Technical PDFs*")
     
     # Render sidebar

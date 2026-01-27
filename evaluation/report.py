@@ -52,7 +52,7 @@ def generate_markdown_report(
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     lines = [
-        "# XPANCEO DB Evaluation Report",
+        "# XPANCEO DATABASE Evaluation Report",
         "",
         f"**Generated**: {now}",
         "",

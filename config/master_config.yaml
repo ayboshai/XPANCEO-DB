@@ -1,5 +1,5 @@
 # =============================================================================
-# XPANCEO DB - Master Configuration
+# XPANCEO DATABASE - Master Configuration
 # =============================================================================
 # All tunables in one place. No hardcoded values in code.
 # Environment variables: ${VAR_NAME} syntax

@@ -1,4 +1,4 @@
-"""XPANCEO DB RAG Module - Retrieval and Generation components."""
+"""XPANCEO DATABASE RAG Module - Retrieval and Generation components."""
 
 from .retriever import Retriever
 from .generator import Generator

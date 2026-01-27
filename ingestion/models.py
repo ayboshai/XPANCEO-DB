@@ -1,5 +1,5 @@
 """
-Pydantic models for XPANCEO DB data structures.
+Pydantic models for XPANCEO DATABASE data structures.
 All data contracts defined here - single source of truth for schemas.
 """
 
