@@ -43,9 +43,7 @@ pip install -r requirements.txt
 export OPENAI_API_KEY=YOUR_KEY
 ```
 
-## 4) Quick Smoke Test (5%)
-
-This is the fastest reliable loop after any change.
+## 4) Quick Run
 
 ```bash
 python3 - <<'PY'
@@ -57,7 +55,7 @@ if path.exists():
 print('cleaned', not path.exists())
 PY
 
-python3 scripts/ingest.py test_subset_5d --config config/iter_10a.yaml
+python3 scripts/ingest.py <pdf_folder> --config config/iter_10a.yaml
 
 python3 scripts/generate_dataset.py \
   --config config/iter_10a.yaml \
@@ -69,31 +67,7 @@ python3 scripts/eval.py \
   --dataset evaluation/datasets/iter_10a_small.jsonl
 ```
 
-## 5) Controlled 10% Run
-
-```bash
-python3 - <<'PY'
-import shutil
-from pathlib import Path
-path = Path('data/iter_10a')
-if path.exists():
-    shutil.rmtree(path)
-print('cleaned', not path.exists())
-PY
-
-python3 scripts/ingest.py test_subset_10a --config config/iter_10a.yaml
-
-python3 scripts/generate_dataset.py \
-  --config config/iter_10a.yaml \
-  --out evaluation/datasets/iter_10a_small.jsonl \
-  --overall-count 6 --table-count 4 --image-count 4 --no-answer-count 6
-
-python3 scripts/eval.py \
-  --config config/iter_10a.yaml \
-  --dataset evaluation/datasets/iter_10a_small.jsonl
-```
-
-## 6) Sanity Checks (Required)
+## 5) Sanity Checks (Required)
 
 Unsupported formats must be gone:
 
@@ -120,7 +94,7 @@ print({'success_nonempty': success_nonempty, 'index_ntotal': idx.index.ntotal, '
 PY
 ```
 
-## 7) Chat / UI
+## 6) Chat / UI
 
 CLI chat:
 
@@ -140,7 +114,7 @@ UI notes:
 - It can generate a dataset and run evaluation from the sidebar.
 - Ingestion shows live progress by stage (parse → images → embed/index).
 
-## 8) Project Map
+## 7) Project Map
 
 Core modules:
 - `ingestion/parser.py`
