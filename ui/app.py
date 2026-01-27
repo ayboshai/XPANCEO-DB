@@ -859,11 +859,25 @@ def get_document_stats(chunks_file: str) -> dict:
 
 def format_source_card(source):
     """Format source as HTML card."""
+    # Handle dict (from history) vs object (from live run)
+    if isinstance(source, dict):
+        doc_id = source.get("doc_id", "???")
+        page = source.get("page", "?")
+        stype = source.get("type", "text")
+        score = source.get("score", 0.0)
+        preview = source.get("preview", "")
+    else:
+        doc_id = getattr(source, "doc_id", "???")
+        page = getattr(source, "page", "?")
+        stype = getattr(source, "type", "text")
+        score = getattr(source, "score", 0.0)
+        preview = getattr(source, "preview", "")
+
     return f"""
     <div class="source-card">
-        <strong>📄 {source.doc_id}</strong> | Page {source.page} | {source.type}<br>
-        <small>Score: {source.score:.3f}</small><br>
-        <em>{source.preview}</em>
+        <strong>📄 {doc_id}</strong> | Page {page} | {stype}<br>
+        <small>Score: {score:.3f}</small><br>
+        <em>{preview}</em>
     </div>
     """
 
