@@ -32,7 +32,6 @@ data/
 # Evaluation runs (keep example)
 evaluation/runs/*/
 !evaluation/runs/example/
-evaluation/datasets/
 
 # Logs
 *.log

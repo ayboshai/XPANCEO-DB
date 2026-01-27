@@ -1,0 +1,9 @@
+{
+  "dataset_path": "evaluation/datasets/iter_10a_20260128_013130.jsonl",
+  "chunks_file": "data/iter_10a/chunks.jsonl",
+  "chunks_hash": "68e6e9ce9453bab2b8f6aae49d141f0c",
+  "chunks_count": 2523,
+  "ingest_ts": "2026-01-27T18:16:37.295572Z",
+  "dataset_count": 46,
+  "created_at": "2026-01-27T18:32:02.753214Z"
+}
