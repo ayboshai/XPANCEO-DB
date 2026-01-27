@@ -173,7 +173,7 @@ PY
 
 ## 8) What "Good" Looks Like
 
-On small 5% and 10% runs, the system is considered stable when:
+The system is considered stable when:
 - ingestion completes without crashes,
 - index integrity check shows `diff = 0`,
 - failed chunks remain bounded and explainable,

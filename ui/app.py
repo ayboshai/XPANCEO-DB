@@ -20,6 +20,10 @@ import re
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
+from dotenv import load_dotenv
+
+# Load local .env (API key persistence; not tracked in Git)
+load_dotenv(override=False)
 
 # Logger for UI diagnostics
 logger = logging.getLogger(__name__)
@@ -143,7 +147,7 @@ def init_session_state():
         "active_config": None,
         "active_paths": {},
         "eval_status": {},
-        "api_key_input": "",
+        "api_key_input": os.getenv("OPENAI_API_KEY", ""),
         "model_chat": "gpt-4o-mini",
         "model_vision": "gpt-4o-mini",
         "model_embed": "text-embedding-3-small",
@@ -183,6 +187,39 @@ def format_duration(seconds: float) -> str:
     seconds = max(0, int(seconds))
     minutes, secs = divmod(seconds, 60)
     return f"{minutes}:{secs:02d}"
+
+
+def save_api_key_to_env(api_key: str) -> None:
+    """Persist API key to local .env (not tracked in Git)."""
+    env_path = Path(".env")
+    lines = []
+    if env_path.exists():
+        lines = env_path.read_text().splitlines()
+
+    found = False
+    new_lines = []
+    for line in lines:
+        if line.strip().startswith("OPENAI_API_KEY="):
+            new_lines.append(f"OPENAI_API_KEY={api_key}")
+            found = True
+        else:
+            new_lines.append(line)
+
+    if not found:
+        new_lines.append(f"OPENAI_API_KEY={api_key}")
+
+    env_path.write_text("\n".join(new_lines) + "\n")
+
+
+def clear_api_key_from_env() -> None:
+    """Remove API key from local .env."""
+    env_path = Path(".env")
+    if not env_path.exists():
+        return
+
+    lines = env_path.read_text().splitlines()
+    new_lines = [line for line in lines if not line.strip().startswith("OPENAI_API_KEY=")]
+    env_path.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
 
 
 def list_config_paths() -> List[str]:
@@ -876,16 +913,18 @@ def render_sidebar():
                     if api_key:
                         st.session_state.api_key_input = api_key
                         os.environ["OPENAI_API_KEY"] = api_key
+                        save_api_key_to_env(api_key)
                         from shared import load_config as _reload_config
                         _reload_config(st.session_state.config_path, force_reload=True)
-                        st.success("API key set for this session")
+                        st.success("API key saved locally and loaded")
                     else:
                         st.warning("Enter a key first")
             with col_clear:
                 if st.button("🧽 Clear Stored Key", use_container_width=True):
                     st.session_state.api_key_input = ""
                     os.environ.pop("OPENAI_API_KEY", None)
-                    st.success("Cleared API key from session")
+                    clear_api_key_from_env()
+                    st.success("Cleared API key from session and .env")
 
             if os.getenv("OPENAI_API_KEY"):
                 st.info("API key is loaded in this session")
