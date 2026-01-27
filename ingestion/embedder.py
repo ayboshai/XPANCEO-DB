@@ -18,6 +18,12 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# OpenAI limit observed in practice: 300k tokens per request.
+# Keep a safety margin to avoid request failures on large corpora.
+EMBED_MAX_TOKENS_PER_REQUEST = 240_000
+# Also cap number of texts per request to keep latency predictable.
+EMBED_MAX_TEXTS_PER_REQUEST = 512
+
 
 class EmbeddingProvider(Protocol):
     """Protocol for embedding providers."""
@@ -63,6 +69,13 @@ class OpenAIEmbedder:
             os.makedirs(cache_dir, exist_ok=True)
         
         self._client = None
+        self._tokenizer = None
+        try:
+            import tiktoken  # type: ignore
+            self._tokenizer = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            # Fallback to a conservative heuristic if tiktoken is unavailable.
+            self._tokenizer = None
     
     @property
     def client(self):
@@ -112,7 +125,20 @@ class OpenAIEmbedder:
         return results[0] if results else []
     
     def _embed_with_retry(self, texts: List[str]) -> List[List[float]]:
-        """Embed texts with retry logic, rate limiting, and concurrency control."""
+        """
+        Embed texts with retry logic, rate limiting, and concurrency control.
+        Large requests are automatically split into safe token-bounded batches.
+        """
+        if not texts:
+            return []
+
+        embeddings: List[List[float]] = []
+        for batch in self._batch_texts(texts):
+            embeddings.extend(self._embed_batch_with_retry(batch))
+        return embeddings
+
+    def _embed_batch_with_retry(self, texts: List[str]) -> List[List[float]]:
+        """Embed a single batch with retry logic and limiter protection."""
         from shared import get_sync_limiter
         limiter = get_sync_limiter()
         
@@ -147,7 +173,46 @@ class OpenAIEmbedder:
                     raise
         
         return []
-    
+
+    def _batch_texts(self, texts: List[str]) -> List[List[str]]:
+        """Split texts into batches bounded by token and count budgets."""
+        batches: List[List[str]] = []
+        current: List[str] = []
+        current_tokens = 0
+
+        for text in texts:
+            est_tokens = self._estimate_tokens(text)
+
+            would_exceed_tokens = current and (current_tokens + est_tokens > EMBED_MAX_TOKENS_PER_REQUEST)
+            would_exceed_count = current and (len(current) >= EMBED_MAX_TEXTS_PER_REQUEST)
+            if would_exceed_tokens or would_exceed_count:
+                batches.append(current)
+                current = []
+                current_tokens = 0
+
+            current.append(text)
+            current_tokens += est_tokens
+
+        if current:
+            batches.append(current)
+
+        if len(batches) > 1:
+            logger.info(f"Embedding split into {len(batches)} batches due to token budget")
+
+        return batches
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Conservative token estimate to keep batch sizes below API limits."""
+        if not text:
+            return 1
+        if self._tokenizer is not None:
+            try:
+                return max(1, len(self._tokenizer.encode(text)))
+            except Exception:
+                pass
+        # Conservative fallback: assume ~3 characters per token.
+        return max(1, len(text) // 3)
+
     def _compute_hash(self, text: str) -> str:
         """Compute hash for cache key."""
         content = f"{self.model}:{text}"
@@ -178,24 +243,6 @@ class OpenAIEmbedder:
                 json.dump(embedding, f)
         except Exception as e:
             logger.warning(f"Failed to cache embedding: {e}")
-
-
-class GeminiEmbedder:
-    """
-    Placeholder for Gemini embeddings.
-    Implement when switching provider.
-    """
-    
-    def __init__(self, api_key: str, model: str = "models/embedding-001"):
-        self.api_key = api_key
-        self.model = model
-        raise NotImplementedError("Gemini embedder not yet implemented. Use OpenAI.")
-    
-    def embed(self, texts: List[str]) -> List[List[float]]:
-        raise NotImplementedError()
-    
-    def embed_single(self, text: str) -> List[float]:
-        raise NotImplementedError()
 
 
 def create_embedder(config: dict) -> OpenAIEmbedder:

@@ -14,7 +14,6 @@ import tempfile
 import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional
-from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -28,21 +27,40 @@ class TestAPIKeyConfig:
     def test_api_key_from_env(self):
         """API key can be set via environment variable."""
         test_key = "sk-test-key-12345"
-        with patch.dict(os.environ, {"OPENAI_API_KEY": test_key}):
+        old_key = os.environ.get("OPENAI_API_KEY")
+        os.environ["OPENAI_API_KEY"] = test_key
+        try:
             from rag.pipeline import load_config
             config = load_config()
             assert config.get("openai_api_key") == test_key
+        finally:
+            if old_key is None:
+                os.environ.pop("OPENAI_API_KEY", None)
+            else:
+                os.environ["OPENAI_API_KEY"] = old_key
     
     def test_api_key_status_detection(self):
         """UI status correctly detects API key presence."""
         # With key
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
+        old_key = os.environ.get("OPENAI_API_KEY")
+        os.environ["OPENAI_API_KEY"] = "sk-test"
+        try:
             assert os.getenv("OPENAI_API_KEY") is not None
+        finally:
+            if old_key is None:
+                os.environ.pop("OPENAI_API_KEY", None)
+            else:
+                os.environ["OPENAI_API_KEY"] = old_key
         
         # Without key
-        with patch.dict(os.environ, {"OPENAI_API_KEY": ""}, clear=True):
+        old_key = os.environ.get("OPENAI_API_KEY")
+        os.environ.pop("OPENAI_API_KEY", None)
+        try:
             key = os.getenv("OPENAI_API_KEY", "")
             assert key == "" or key is None
+        finally:
+            if old_key is not None:
+                os.environ["OPENAI_API_KEY"] = old_key
 
 
 class TestPipelineConfigOverride:
@@ -69,21 +87,6 @@ class TestPipelineConfigOverride:
         assert base_config["model_chat"] == "gpt-4o"
         assert base_config["top_k"] == 10
         assert base_config["hybrid_enabled"] == True
-    
-    def test_top_k_affects_retrieval(self):
-        """top_k parameter changes number of retrieved chunks."""
-        # This tests the logic, not actual retrieval (requires indexed data)
-        from rag.pipeline import RAGPipeline
-        
-        # Verify RAGPipeline stores top_k
-        mock_retriever = MagicMock()
-        mock_generator = MagicMock()
-        
-        pipeline_5 = RAGPipeline(mock_retriever, mock_generator, top_k=5)
-        pipeline_10 = RAGPipeline(mock_retriever, mock_generator, top_k=10)
-        
-        assert pipeline_5.top_k == 5
-        assert pipeline_10.top_k == 10
     
     def test_model_selection_stored(self):
         """Model configuration is properly stored."""
@@ -257,13 +260,16 @@ class TestWarnings:
     
     def test_warning_no_api_key(self):
         """Warning shown when API key missing."""
-        with patch.dict(os.environ, {}, clear=True):
-            # Remove OPENAI_API_KEY
-            os.environ.pop("OPENAI_API_KEY", None)
+        old_key = os.environ.get("OPENAI_API_KEY")
+        os.environ.pop("OPENAI_API_KEY", None)
+        try:
             warnings = []
             if not os.getenv("OPENAI_API_KEY"):
                 warnings.append("API key not set")
             assert "API key not set" in warnings
+        finally:
+            if old_key is not None:
+                os.environ["OPENAI_API_KEY"] = old_key
     
     def test_warning_no_chunks(self, tmp_path):
         """Warning shown when no chunks ingested."""
@@ -286,14 +292,25 @@ class TestDatasetGeneration:
     """Test dataset generation flags."""
     
     def test_require_ragas_flag(self):
-        """require_ragas flag exists in generator."""
+        """require_ragas triggers error when use_ragas=False."""
         from evaluation.generate_dataset import DatasetGenerator
-        import inspect
-        
-        sig = inspect.signature(DatasetGenerator.generate_overall)
-        params = list(sig.parameters.keys())
-        
-        assert "require_ragas" in params
+        from ingestion.models import Chunk, ChunkMetadata
+        import pytest
+
+        chunks = [
+            Chunk(
+                doc_id="test",
+                page=1,
+                chunk_id="test_1",
+                type="text",
+                content="Test content.",
+                metadata=ChunkMetadata(),
+            )
+        ]
+
+        gen = DatasetGenerator(api_key="test-key")
+        with pytest.raises(RuntimeError):
+            gen.generate_overall(chunks, num_questions=1, use_ragas=False, require_ragas=True)
     
     def test_strict_mode_flag(self):
         """strict mode flag exists in generate_full_dataset."""

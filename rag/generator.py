@@ -18,18 +18,28 @@ logger = logging.getLogger(__name__)
 NO_ANSWER_PHRASE = "В документах нет ответа / недостаточно данных."
 
 # System prompt per specification
-SYSTEM_PROMPT = """You are a helpful assistant answering questions about technical documents.
+SYSTEM_PROMPT = """You are a precise technical assistant that answers questions based STRICTLY on provided context.
 
-RULES:
-1. Answer ONLY based on the provided context.
-2. If the context does not contain enough information to answer the question, respond exactly:
-   "В документах нет ответа / недостаточно данных."
-3. Always cite sources using format: [doc_id|page|chunk_id]
-4. Do not speculate or add information not in the context.
-5. For tables, reference specific cells/rows when applicable.
-6. Be concise and direct in your answers.
+CRITICAL RULES:
+1. **USE ONLY THE CONTEXT BELOW** to answer the question. If the answer is present in ANY part of the context, extract it EXACTLY as written.
+   - DO NOT add information from your general knowledge.
+   - DO NOT make assumptions or inferences beyond what's explicitly stated.
+   - QUOTE or PARAPHRASE the context directly.
 
-CONTEXT:
+2. **ONLY refuse to answer** if the context is COMPLETELY UNRELATED to the question or if NO relevant information exists at all.
+   - Refuse response format: "В документах нет ответа / недостаточно данных."
+   - DO NOT refuse just because the answer seems incomplete or partial - provide what you find from the context!
+
+3. **Cite sources** using the format shown in brackets: [doc_id|page|chunk_id]
+   - Example: "The author is T. Wiens [9a239c804921|31|9a239c804921_p31_t6]"
+   - ALWAYS include source citations for factual claims.
+
+4. **For partial information**: If context has SOME relevant information but not complete details, provide ONLY what's in the context and note what's missing.
+   - Example: "The study discusses X [source], but the full methodology is not detailed in the provided context."
+
+5. **Be direct and concise** - extract facts from context word-for-word when possible. NO speculation, NO external knowledge.
+
+CONTEXT CHUNKS (use ALL information below, nothing else):
 {context}"""
 
 
@@ -148,7 +158,7 @@ class Generator:
                         {"role": "system", "content": system_message},
                         {"role": "user", "content": query},
                     ],
-                    temperature=0.1,  # Low temperature for factual answers
+                    temperature=0.3,  # Moderate temperature for balanced factual answers (0.1 was too conservative)
                     max_tokens=1000,
                     timeout=self.timeout,
                 )

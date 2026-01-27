@@ -8,19 +8,28 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import time
+import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple, Dict,  Callable, Iterator, Optional
+from typing import List, Tuple, Dict, Callable, Iterator, Optional
 
 from .captioner import VisionCaptioner
 from .chunker import Chunker
 from .embedder import OpenAIEmbedder, create_embedder
 from .index_faiss import FAISSIndex, create_index
-from .models import Chunk, ChunkCounts, ErrorLogEntry, RegistryEntry
-from .ocr import OCRProcessor, compute_image_hash
+from .models import Chunk, ChunkCounts, ErrorLogEntry, RegistryEntry, OCRResult
+from .ocr import OCRProcessor, compute_image_hash, classify_image_content, VALID_IMAGE_TYPES
 from .parser import PDFParser, Element
 
 logger = logging.getLogger(__name__)
+
+# Image routing constants (kept module-level for clarity and review).
+TINY_MAX_DIM = 48
+TINY_MAX_AREA = 2304  # 48x48
+BLANK_UNIFORM_MAX_ENTROPY = 0.5
+BLANK_UNIFORM_MAX_STDDEV = 5.0
 
 
 class IngestionPipeline:
@@ -31,13 +40,22 @@ class IngestionPipeline:
     
     def __init__(self, config: dict):
         self.config = config
-        
+
+        # Image deduplication cache (per-document, cleared on each ingest_document call)
+        # Key: image_hash (MD5), Value: dict with caption, ocr_result, image_type
+        self.image_cache = {}
+
+        # IMPORTANT: initialize global sync limiter once with this run's config.
+        # This avoids per-call limiter recreation and ensures iter configs apply.
+        from shared import get_sync_limiter
+        get_sync_limiter(config)
+
         # Initialize components
         self.parser = PDFParser(
             image_output_dir=os.path.join(config.get("cache_dir", "data/cache"), "images"),
             doc_id_strategy=config.get("doc_id_strategy", "hash"),
         )
-        
+
         self.chunker = Chunker(
             chunk_size_tokens=config.get("chunk_size_tokens", 512),
             chunk_overlap_tokens=config.get("chunk_overlap_tokens", 50),
@@ -57,6 +75,7 @@ class IngestionPipeline:
             max_retries=config.get("api_max_retries", 3),
             backoff_base=config.get("api_backoff_base", 2.0),
             timeout=config.get("api_timeout", 30),
+            config=config,
         )
         
         self.embedder = create_embedder(config)
@@ -67,13 +86,15 @@ class IngestionPipeline:
         self.chunks_file = os.path.join(self.data_dir, "chunks.jsonl")
         self.registry_file = os.path.join(self.data_dir, "pdf_registry.jsonl")
         self.error_log_file = os.path.join(self.data_dir, "error_log.jsonl")
-        
+        self.timing_file = os.path.join(self.data_dir, "timing.jsonl")
+
         os.makedirs(self.data_dir, exist_ok=True)
     
     def ingest_folder(
         self,
         folder_path: str,
         progress_callback: Optional[Callable[[str, int, int], None]] = None,
+        stage_callback: Optional[Callable[[str, int, int], None]] = None,
     ) -> List[RegistryEntry]:
         """
         Ingest all PDFs from a folder.
@@ -81,6 +102,7 @@ class IngestionPipeline:
         Args:
             folder_path: Path to folder containing PDFs
             progress_callback: Optional callback(filename, current, total)
+            stage_callback: Optional callback(stage, stage_index, stage_total)
             
         Returns:
             List of registry entries for processed documents
@@ -93,7 +115,7 @@ class IngestionPipeline:
                 progress_callback(pdf_path.name, i + 1, len(pdf_files))
             
             try:
-                entry = self.ingest_pdf(str(pdf_path))
+                entry = self.ingest_pdf(str(pdf_path), stage_callback=stage_callback)
                 results.append(entry)
             except Exception as e:
                 logger.error(f"Failed to ingest {pdf_path}: {e}")
@@ -107,21 +129,45 @@ class IngestionPipeline:
         
         return results
     
-    def ingest_pdf(self, pdf_path: str) -> RegistryEntry:
+    def ingest_pdf(
+        self,
+        pdf_path: str,
+        stage_callback: Optional[Callable[[str, int, int], None]] = None,
+    ) -> RegistryEntry:
         """
-        Ingest single PDF file.
-        
+        Ingest single PDF file with stage timing telemetry.
+
         Args:
             pdf_path: Path to PDF file
-            
+            stage_callback: Optional callback(stage, stage_index, stage_total)
+
         Returns:
             Registry entry with processing statistics
         """
         logger.info(f"Ingesting: {pdf_path}")
-        
-        # Parse PDF to get doc_id
-        doc_id, elements = self.parser.parse(pdf_path)
-        page_count = self.parser.get_page_count(pdf_path)
+
+        # Generate unique run_id for timing telemetry
+        run_id = str(uuid.uuid4())
+
+        stage_total = 6
+
+        def _stage(name: str, idx: int) -> None:
+            if stage_callback:
+                stage_callback(name, idx, stage_total)
+
+        # Clear image cache for new document (prevents cross-document pollution)
+        self.image_cache.clear()
+
+        # Parse PDF to get doc_id, elements, and page_count
+        # Use detailed timing callback for parse substages
+        def parse_timing_cb(stage: str, duration: float):
+            self._log_timing(run_id, pdf_path, stage, duration)
+
+        _stage("parse", 1)
+        t0 = time.time()
+        doc_id, elements, page_count = self.parser.parse(pdf_path, timing_callback=parse_timing_cb)
+        total_parse = time.time() - t0
+        self._log_timing(run_id, pdf_path, "parse_total", total_parse)
         
         # Handle reupload policy
         reupload_policy = self.config.get("reupload_policy", "new_version")
@@ -144,7 +190,6 @@ class IngestionPipeline:
             else:  # new_version
                 # Generate new unique doc_id
                 import hashlib
-                import time
                 new_hash = hashlib.md5(f"{pdf_path}:{time.time()}".encode()).hexdigest()[:12]
                 logger.info(f"Creating new version: {doc_id} -> {new_hash}")
                 doc_id = new_hash
@@ -167,6 +212,7 @@ class IngestionPipeline:
                 text_table_elements.append(elem)
         
         # Process text and tables
+        _stage("chunk_text_tables", 2)
         text_table_chunks = self.chunker.chunk(
             text_table_elements,
             doc_id=doc_id,
@@ -174,40 +220,55 @@ class IngestionPipeline:
         )
         all_chunks.extend(text_table_chunks)
         
-        # Process images
-        for elem in image_elements:
-            if not elem.image_path or not os.path.exists(elem.image_path):
-                continue
-            
-            try:
-                image_chunks = self._process_image(
-                    doc_id=doc_id,
-                    page=elem.page,
-                    image_index=image_count,
-                    image_path=elem.image_path,
-                    source_path=pdf_path,
-                )
-                all_chunks.extend(image_chunks)
-                
-                # Track stats
-                for chunk in image_chunks:
-                    if chunk.type == "image_ocr" and chunk.metadata.ocr_failed:
-                        ocr_failures += 1
-                    if chunk.type == "image_caption" and chunk.metadata.vision_used:
-                        vision_calls += 1
-                
+        # Process images sequentially. Tesseract performs poorly under thread load.
+        t0 = time.time()
+        _stage("image_processing", 3)
+        if image_elements:
+            low_info_hashes = self._identify_low_info_images(image_elements)
+            if low_info_hashes:
+                logger.info(f"Identified {len(low_info_hashes)} low-info decorative images")
+
+            for idx, elem in enumerate(image_elements):
+                if not elem.image_path or not os.path.exists(elem.image_path):
+                    continue
+
+                try:
+                    result = self._process_image(
+                        doc_id=doc_id,
+                        page=elem.page,
+                        image_index=idx,
+                        image_path=elem.image_path,
+                        source_path=pdf_path,
+                        low_info_hashes=low_info_hashes,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to process image on page {elem.page}: {e}")
+                    self._log_error(doc_id, elem.page, "image", str(e))
+                    errors += 1
+                    continue
+
+                if result:
+                    all_chunks.extend(result)
+                    for chunk in result:
+                        if chunk.type == "image_ocr" and chunk.metadata.ocr_failed:
+                            ocr_failures += 1
+                        if chunk.type == "image_caption" and chunk.metadata.vision_used:
+                            vision_calls += 1
+
                 image_count += 1
-                
-            except Exception as e:
-                logger.error(f"Failed to process image on page {elem.page}: {e}")
-                self._log_error(doc_id, elem.page, "image", str(e))
-                errors += 1
-        
+
+        if image_count > 0:
+            self._log_timing(run_id, pdf_path, "image_processing", time.time() - t0)
+
         # Save chunks to JSONL
+        _stage("save_chunks", 4)
         self._save_chunks(all_chunks)
-        
+
         # Embed and index
+        t0 = time.time()
+        _stage("embed_and_index", 5)
         self._embed_and_index(all_chunks)
+        self._log_timing(run_id, pdf_path, "embed_and_index", time.time() - t0)
         
         # Create registry entry
         chunk_counts = ChunkCounts(
@@ -235,6 +296,8 @@ class IngestionPipeline:
             f"(text={chunk_counts.text}, table={chunk_counts.table}, "
             f"ocr={chunk_counts.image_ocr}, caption={chunk_counts.image_caption})"
         )
+
+        _stage("done", 6)
         
         return entry
     
@@ -245,43 +308,533 @@ class IngestionPipeline:
         image_index: int,
         image_path: str,
         source_path: str,
+        low_info_hashes: Optional[set] = None,
     ) -> List[Chunk]:
-        """Process single image: OCR + optional Vision fallback."""
+        """
+        Process single image with type-based routing and deduplication.
+
+        Routing summary:
+        - All images run through OCR (for audit + text anchors).
+        - text_scan/table_scan: Vision only on catastrophic OCR failure.
+        - chart/diagram/photo: Vision by default, except blank/uniform or low-info.
+
+        Deduplication: reuse OCR/Vision results for duplicate images by MD5 hash.
+        """
         image_hash = compute_image_hash(image_path)
-        
-        # Run OCR
-        ocr_result = self.ocr.run(image_path)
-        ocr_failed = self.ocr.is_ocr_failed(ocr_result)
-        
-        # Vision caption if OCR failed
+        is_low_info = bool(low_info_hashes and image_hash in low_info_hashes)
+
+        # Reuse OCR/Vision results for duplicate images.
+        if image_hash in self.image_cache:
+            cached = self.image_cache[image_hash]
+            logger.debug(f"Reusing cached result for image {image_hash[:8]} (type={cached['image_type']})")
+
+            # Retrieve cached values
+            image_type = cached['image_type']
+            ocr_result = cached.get('ocr_result')
+            ocr_text = cached.get('ocr_text', '')
+            caption = cached.get('caption')
+            ocr_catastrophic = cached.get('ocr_catastrophic')
+            vision_error_override = cached.get('vision_error_override')
+            if ocr_catastrophic is None:
+                ocr_catastrophic = self._is_catastrophic_ocr(ocr_result)
+
+            if image_type == 'table_scan' and ocr_text and ocr_text.strip():
+                ocr_failed = self.ocr.is_ocr_failed(ocr_result) if ocr_result else False
+                return self._create_table_chunks_from_ocr(
+                    doc_id=doc_id,
+                    page=page,
+                    image_index=image_index,
+                    source_path=source_path,
+                    image_hash=image_hash,
+                    image_type=image_type,
+                    ocr_text=ocr_text,
+                    ocr_result=ocr_result,
+                    ocr_failed=ocr_failed,
+                    ocr_catastrophic=ocr_catastrophic,
+                    caption=caption,
+                )
+
+            # Create chunks from cached data
+            return self.chunker.create_image_chunks(
+                doc_id=doc_id,
+                page=page,
+                image_index=image_index,
+                ocr_text=ocr_text,
+                ocr_result=ocr_result,
+                caption=caption,
+                image_path=image_path,
+                image_hash=image_hash,
+                source_path=source_path,
+                config=self.config,
+                image_type=image_type,
+                ocr_catastrophic=ocr_catastrophic,
+                vision_error_override=vision_error_override,
+            )
+
+        # Classify image type (pure heuristics, no OCR).
+        image_type = classify_image_content(image_path)
+        assert image_type in VALID_IMAGE_TYPES, f"Invalid image type: {image_type}"
+        logger.debug(f"Image {image_path} classified as: {image_type}")
+
+        # Step 2: Route based on type
+        ocr_result = None
+        ocr_text = ""
+        ocr_failed = False
+        ocr_catastrophic = False
         caption = None
-        if ocr_failed:
-            caption, vision_success = self.captioner.run(image_path)
-            if not vision_success:
+        vision_error_override = None
+
+        # Low-info decorative images: run OCR first and skip Vision on catastrophic OCR.
+        if is_low_info:
+            logger.info(f"Low-info decorative image detected on page {page}: {image_path}")
+            ocr_result = self.ocr.run(image_path)
+            ocr_text = ocr_result.text if ocr_result else ""
+            ocr_failed = self.ocr.is_ocr_failed(ocr_result)
+            ocr_catastrophic = self._is_catastrophic_ocr(ocr_result)
+
+            if ocr_catastrophic:
+                logger.info(f"Skipping Vision for decorative low-info image (catastrophic OCR): {image_path}")
+                vision_error_override = "Vision skipped: low-info catastrophic OCR"
+                self.image_cache[image_hash] = {
+                    'image_type': image_type,
+                    'ocr_result': ocr_result,
+                    'ocr_text': ocr_text,
+                    'caption': None,
+                    'ocr_catastrophic': ocr_catastrophic,
+                    'vision_error_override': vision_error_override,
+                }
+                return self.chunker.create_image_chunks(
+                    doc_id=doc_id,
+                    page=page,
+                    image_index=image_index,
+                    ocr_text=ocr_text,
+                    ocr_result=ocr_result,
+                    caption=None,
+                    image_path=image_path,
+                    image_hash=image_hash,
+                    source_path=source_path,
+                    config=self.config,
+                    image_type=image_type,
+                    ocr_catastrophic=ocr_catastrophic,
+                    vision_error_override=vision_error_override,
+                )
+
+        if image_type in ('text_scan', 'table_scan'):
+            # OCR path for scanned text/tables
+            if ocr_result is None:
+                ocr_result = self.ocr.run(image_path)
+                ocr_text = ocr_result.text if ocr_result else ""
+                ocr_failed = self.ocr.is_ocr_failed(ocr_result)
+                ocr_catastrophic = self._is_catastrophic_ocr(ocr_result)
+
+            # Vision fallback only on catastrophic OCR failure to avoid excess token usage
+            if ocr_failed and ocr_catastrophic:
+                vision_success = False
+                if self._should_skip_vision_blank_uniform(ocr_result, image_path):
+                    vision_error_override = "Vision skipped: blank/uniform image"
+                    logger.info(
+                        f"Skipping Vision for blank/uniform image (catastrophic OCR): {image_path}"
+                    )
+                    caption = None
+                else:
+                    caption, vision_success = self.captioner.run(image_path)
+                    if vision_success:
+                        caption = self._filter_refusal_caption(caption)
+                        if caption and self._is_low_information_caption(caption):
+                            logger.info(f"Low-information caption detected, treating as failure: {image_path}")
+                            caption = None
+                            vision_success = False
+                        if not caption:
+                            vision_success = False
+                    if not vision_success:
+                        caption = None
+                        logger.warning(f"Both OCR and Vision failed for {image_path}")
+            elif ocr_failed:
+                logger.info(
+                    "OCR below thresholds but non-catastrophic; skipping Vision fallback "
+                    f"for {image_path} (chars={getattr(ocr_result,'char_count',0)})"
+                )
+        else:
+            # Visual types (chart/diagram/photo): Vision is required for semantics.
+            # Skip Vision only for blank/uniform or known low-info images.
+            if ocr_result is None:
+                ocr_result = self.ocr.run(image_path)
+                ocr_text = ocr_result.text if ocr_result else ""
+                ocr_failed = self.ocr.is_ocr_failed(ocr_result)
+                ocr_catastrophic = self._is_catastrophic_ocr(ocr_result)
+
+            vision_success = False
+            vision_reason = None  # "refused" | "low_info" | "error" | "skipped_*"
+
+            if self._should_skip_vision_blank_uniform(ocr_result, image_path):
+                vision_reason = "skipped_blank_uniform"
+                vision_error_override = "Vision skipped: blank/uniform image"
+                logger.info(f"Skipping Vision for blank/uniform image: {image_path}")
                 caption = None
-                logger.warning(f"Vision fallback failed for {image_path}")
-        
-        # Create chunks with config for proper OCR threshold checking
+            elif is_low_info:
+                vision_reason = "skipped_low_info"
+                vision_error_override = "Vision skipped: low-info image"
+                logger.info(f"Skipping Vision for low-info decorative image: {image_path}")
+                caption = None
+            else:
+                caption, vision_success = self.captioner.run(image_path)
+                if vision_success:
+                    filtered = self._filter_refusal_caption(caption)
+                    if filtered is None:
+                        vision_reason = "refused"
+                        caption = None
+                        vision_success = False
+                    elif self._is_low_information_caption(filtered):
+                        vision_reason = "low_info"
+                        caption = None
+                        vision_success = False
+                    else:
+                        caption = filtered
+
+            if not vision_success:
+                if vision_reason == "skipped_blank_uniform":
+                    logger.info(f"Vision skipped for blank/uniform image: {image_path}")
+                elif vision_reason == "skipped_low_info":
+                    logger.info(f"Vision skipped for low-info image: {image_path}")
+                elif vision_reason == "low_info":
+                    logger.info(f"Vision low-information caption, using OCR fallback: {image_path}")
+                elif vision_reason == "refused":
+                    logger.warning(f"Vision refused for visual content: {image_path}, trying OCR fallback")
+                else:
+                    logger.warning(f"Vision failed for visual content: {image_path}, using OCR fallback")
+                caption = None
+                if ocr_failed:
+                    if vision_reason == "low_info":
+                        logger.info(f"Both Vision and OCR low-signal for visual content: {image_path}")
+                    else:
+                        logger.warning(f"Both Vision and OCR failed for visual content: {image_path}")
+
+        # Store in cache for reuse.
+        self.image_cache[image_hash] = {
+            'image_type': image_type,
+            'ocr_result': ocr_result,
+            'ocr_text': ocr_text,
+            'caption': caption,
+            'ocr_catastrophic': ocr_catastrophic,
+            'vision_error_override': vision_error_override,
+        }
+
+        if image_type == 'table_scan' and ocr_text and ocr_text.strip():
+            return self._create_table_chunks_from_ocr(
+                doc_id=doc_id,
+                page=page,
+                image_index=image_index,
+                source_path=source_path,
+                image_hash=image_hash,
+                image_type=image_type,
+                ocr_text=ocr_text,
+                ocr_result=ocr_result,
+                ocr_failed=ocr_failed,
+                ocr_catastrophic=ocr_catastrophic,
+                caption=caption,
+            )
+
+        # Create chunks with image_type in metadata
         return self.chunker.create_image_chunks(
             doc_id=doc_id,
             page=page,
             image_index=image_index,
-            ocr_text=ocr_result.text,
+            ocr_text=ocr_text,
             ocr_result=ocr_result,
             caption=caption,
             image_path=image_path,
             image_hash=image_hash,
             source_path=source_path,
             config=self.config,
+            image_type=image_type,
+            ocr_catastrophic=ocr_catastrophic,
+            vision_error_override=vision_error_override,
+        )
+
+    # Anchored refusal patterns - won't match "cannot be used" etc.
+    _REFUSAL_PATTERNS = [
+        re.compile(r"^I cannot\b", re.IGNORECASE),
+        re.compile(r"^I'm unable\b", re.IGNORECASE),
+        re.compile(r"^I can't\b", re.IGNORECASE),
+        re.compile(r"^Sorry,\s+I\b", re.IGNORECASE),
+        re.compile(r"^I'm sorry\b", re.IGNORECASE),
+        re.compile(r"unable to (?:analyze|process|view|see)", re.IGNORECASE),
+        re.compile(r"cannot (?:analyze|process|view|see) (?:this|the) image", re.IGNORECASE),
+    ]
+
+    def _compute_ahash(self, image_path: str, size: int = 8) -> Optional[int]:
+        """Compute a simple average hash (aHash) for perceptual duplicate detection."""
+        try:
+            from PIL import Image
+        except ImportError:
+            return None
+
+        try:
+            with Image.open(image_path) as img:
+                img = img.convert("L").resize((size, size))
+                pixels = list(img.getdata())
+        except Exception:
+            return None
+
+        if not pixels:
+            return None
+
+        mean_val = sum(pixels) / len(pixels)
+        bits = ["1" if px >= mean_val else "0" for px in pixels]
+        try:
+            return int("".join(bits), 2)
+        except ValueError:
+            return None
+
+    def _identify_low_info_images(self, image_elements: List[Element]) -> set:
+        """
+        Identify decorative low-information images to avoid wasting Vision calls.
+        Rules:
+        - Tiny images (very small max dimension/area) are always low-info.
+        - Small images (<=200px max dimension) that repeat perceptually (aHash freq >= 3)
+          are also low-info.
+        Images are NOT dropped; Vision is only skipped when OCR is catastrophic.
+        """
+        if not image_elements:
+            return set()
+
+        ahash_counts: Dict[int, int] = {}
+        small_records: List[Tuple[str, int]] = []
+        low_info_hashes: set = set()
+
+        try:
+            from PIL import Image
+        except ImportError:
+            return set()
+
+        for elem in image_elements:
+            path = elem.image_path
+            if not path or not os.path.exists(path):
+                continue
+            try:
+                with Image.open(path) as img:
+                    w, h = img.size
+                    max_dim = max(w, h)
+                    area = w * h
+            except Exception:
+                continue
+
+            # Unconditionally mark tiny images as low-info to avoid useless Vision calls
+            if max_dim <= TINY_MAX_DIM or area <= TINY_MAX_AREA:
+                low_info_hashes.add(compute_image_hash(path))
+                continue
+
+            if max_dim > 200:
+                continue
+
+            ah = self._compute_ahash(path)
+            if ah is None:
+                continue
+
+            img_hash = compute_image_hash(path)
+            small_records.append((img_hash, ah))
+            ahash_counts[ah] = ahash_counts.get(ah, 0) + 1
+
+        repeated_ahash = {ah for ah, count in ahash_counts.items() if count >= 3}
+        if not repeated_ahash:
+            return low_info_hashes
+
+        repeated_hashes = {img_hash for img_hash, ah in small_records if ah in repeated_ahash}
+        return low_info_hashes | repeated_hashes
+
+    def _create_table_chunks_from_ocr(
+        self,
+        *,
+        doc_id: str,
+        page: int,
+        image_index: int,
+        source_path: str,
+        image_hash: str,
+        image_type: str,
+        ocr_text: str,
+        ocr_result: Optional[OCRResult],
+        ocr_failed: bool,
+        ocr_catastrophic: bool,
+        caption: Optional[str],
+    ) -> List[Chunk]:
+        """Create table chunks from OCR text, optionally adding a Vision caption."""
+        from .models import Chunk, ChunkMetadata
+        from datetime import datetime
+
+        if not ocr_text or not ocr_text.strip():
+            return []
+
+        ingest_ts = datetime.utcnow().isoformat() + "Z"
+        processing_status = "failed" if ocr_catastrophic else "success"
+        ocr_confidence = ocr_result.confidence if ocr_result else 0
+        ocr_failed_reason = (
+            ocr_result.get_failure_reason(self.config) if ocr_result and ocr_failed else None
+        )
+
+        chunks: List[Chunk] = []
+        for idx, table_part in enumerate(self.chunker._split_table(ocr_text)):
+            chunk_id = f"{doc_id}_p{page}_i{image_index}_table"
+            if idx > 0:
+                chunk_id += f"_{idx}"
+
+            chunks.append(
+                Chunk(
+                    doc_id=doc_id,
+                    page=page,
+                    chunk_id=chunk_id,
+                    type="table",
+                    content=table_part,
+                    metadata=ChunkMetadata(
+                        source_path=source_path,
+                        table_source="ocr",
+                        image_hash=image_hash,
+                        image_type=image_type,
+                        ocr_confidence=ocr_confidence,
+                        ocr_failed=ocr_failed,
+                        ocr_failed_reason=ocr_failed_reason,
+                        processing_status=processing_status,
+                        ocr_error="catastrophic_ocr" if ocr_catastrophic else None,
+                        ingest_ts=ingest_ts,
+                    ),
+                )
+            )
+
+        if caption and caption.strip():
+            chunks.append(
+                Chunk(
+                    doc_id=doc_id,
+                    page=page,
+                    chunk_id=f"{doc_id}_p{page}_i{image_index}_cap",
+                    type="image_caption",
+                    content=caption,
+                    metadata=ChunkMetadata(
+                        source_path=source_path,
+                        image_hash=image_hash,
+                        image_type=image_type,
+                        ocr_failed=ocr_failed,
+                        ocr_failed_reason=ocr_failed_reason,
+                        vision_used=True,
+                        ingest_ts=ingest_ts,
+                    ),
+                )
+            )
+
+        return chunks
+
+    def _is_blank_ocr(self, result: Optional[OCRResult]) -> bool:
+        """Blank OCR: no words and no characters extracted."""
+        if result is None:
+            return False
+        return getattr(result, "char_count", 0) == 0 and getattr(result, "word_count", 0) == 0
+
+    def _is_uniform_image(self, image_path: str) -> bool:
+        """
+        Detect near-uniform images (solid color / empty canvas).
+        Used only as a guard when OCR is blank to avoid futile Vision calls.
+        """
+        try:
+            from PIL import Image, ImageStat
+            import math
+        except ImportError:
+            return False
+
+        try:
+            with Image.open(image_path) as img:
+                gray = img.convert("L").resize((128, 128))
+                stat = ImageStat.Stat(gray)
+                stddev = float(stat.stddev[0]) if stat.stddev else 0.0
+                hist = gray.histogram()
+        except Exception:
+            return False
+
+        total = sum(hist)
+        if total <= 0:
+            return True
+
+        entropy = 0.0
+        for count in hist:
+            if not count:
+                continue
+            p = count / total
+            entropy -= p * math.log2(p)
+
+        return entropy <= BLANK_UNIFORM_MAX_ENTROPY and stddev <= BLANK_UNIFORM_MAX_STDDEV
+
+    def _should_skip_vision_blank_uniform(self, result: Optional[OCRResult], image_path: str) -> bool:
+        """Skip Vision only when OCR is blank AND the image is near-uniform."""
+        return self._is_blank_ocr(result) and self._is_uniform_image(image_path)
+
+    def _filter_refusal_caption(self, caption: str) -> str:
+        """
+        Filter out Vision API refusal responses.
+
+        Uses anchored patterns to avoid false positives like "cannot be used".
+        Returns None if caption is a refusal, otherwise returns caption unchanged.
+        """
+        if not caption:
+            return None
+
+        for pattern in self._REFUSAL_PATTERNS:
+            if pattern.search(caption):
+                logger.debug(f"Filtered refusal caption: {caption[:50]}...")
+                return None
+
+        return caption
+
+    def _is_low_information_caption(self, caption: Optional[str]) -> bool:
+        """
+        Detect captions that carry almost no usable information.
+        These are stored for audit but not trusted for indexing.
+        """
+        if not caption:
+            return True
+        text = caption.strip().lower()
+        if not text:
+            return True
+        if text == "unreadable":
+            return True
+        if text.startswith("unreadable") and len(text) < 120:
+            return True
+        has_digit = bool(re.search(r"\d", text))
+        tokens = text.split()
+        if len(text) < 12 and not has_digit and len(tokens) <= 2:
+            return True
+        return False
+
+    def _is_catastrophic_ocr(self, result: Optional[OCRResult]) -> bool:
+        """
+        Detect catastrophic OCR failures (very little usable text).
+        This gate controls when we spend extra tokens on Vision fallback
+        for text/table scans.
+        """
+        if result is None:
+            return True
+        return (
+            result.char_count < 30 or
+            result.word_count < 5 or
+            result.alpha_ratio < 0.20
+        )
+
+    def _is_strong_ocr(self, result: Optional[OCRResult]) -> bool:
+        """
+        Detect OCR results that are strong enough to skip Vision safely.
+        Fixed thresholds, no extra config.
+        """
+        if result is None:
+            return False
+        return (
+            result.char_count >= 120 and
+            result.word_count >= 30 and
+            result.alpha_ratio >= 0.45
         )
     
     def _embed_and_index(self, chunks: List[Chunk]) -> None:
-        """Embed chunks and add to index."""
+        """Embed chunks and add to index. Skips failed chunks."""
         if not chunks:
             return
-        
+
         # Prepare texts and metadata
-        texts = [c.content for c in chunks]
+        texts = [self._normalize_for_embedding(c) for c in chunks]
         ids = [c.chunk_id for c in chunks]
         metadata = [
             {
@@ -292,15 +845,21 @@ class IngestionPipeline:
             }
             for c in chunks
         ]
-        
-        # Filter empty texts
-        valid_indices = [i for i, t in enumerate(texts) if t.strip()]
+
+        # Filter empty texts AND failed processing status
+        valid_indices = [
+            i for i, (t, c) in enumerate(zip(texts, chunks))
+            if t.strip() and c.metadata.processing_status == "success"
+        ]
         if not valid_indices:
+            logger.debug(f"No valid chunks to index (all failed or empty)")
             return
-        
+
         texts = [texts[i] for i in valid_indices]
         ids = [ids[i] for i in valid_indices]
         metadata = [metadata[i] for i in valid_indices]
+
+        logger.debug(f"Indexing {len(texts)} chunks (filtered out {len(chunks) - len(texts)} failed/empty)")
         
         # Embed
         try:
@@ -312,11 +871,33 @@ class IngestionPipeline:
         except Exception as e:
             logger.error(f"Failed to embed/index chunks: {e}")
             raise
+
+    def _normalize_for_embedding(self, chunk: Chunk) -> str:
+        """
+        Normalize content for embeddings without altering stored chunk content.
+        - Tables: append a flattened plain-text version to improve semantic retrieval.
+        - Other types: return content as-is.
+        """
+        text = chunk.content or ""
+        if chunk.type == "table":
+            # Flatten table pipes to improve embedding similarity
+            flat = re.sub(r"[|]+", " ", text)
+            flat = re.sub(r"\s+", " ", flat).strip()
+            if flat and flat not in text:
+                return text + "\n\n" + flat
+        elif chunk.type in ("image_caption", "image_ocr"):
+            image_type = getattr(chunk.metadata, "image_type", None) or "image"
+            return f"image {image_type}: {text}"
+        return text
     
     def _save_chunks(self, chunks: List[Chunk]) -> None:
-        """Append chunks to chunks.jsonl."""
+        """Append chunks to chunks.jsonl. Skips chunks with empty content."""
         with open(self.chunks_file, "a", encoding="utf-8") as f:
             for chunk in chunks:
+                # Skip chunks with empty content (defensive check)
+                if not chunk.content.strip():
+                    logger.debug(f"Skipping empty chunk: {chunk.chunk_id}")
+                    continue
                 f.write(chunk.to_jsonl() + "\n")
     
     def _save_registry(self, entry: RegistryEntry) -> None:
@@ -333,7 +914,7 @@ class IngestionPipeline:
     ) -> None:
         """Log error to error_log.jsonl."""
         import traceback
-        
+
         entry = ErrorLogEntry(
             doc_id=doc_id,
             page=page,
@@ -341,10 +922,23 @@ class IngestionPipeline:
             error=error,
             traceback=traceback.format_exc(),
         )
-        
+
         with open(self.error_log_file, "a", encoding="utf-8") as f:
             f.write(entry.to_jsonl() + "\n")
-    
+
+    def _log_timing(self, run_id: str, pdf_path: str, stage: str, duration_sec: float) -> None:
+        """Log stage timing to timing.jsonl for p50/p90 measurement."""
+        entry = {
+            "run_id": run_id,
+            "pdf_path": pdf_path,
+            "stage": stage,
+            "duration_ms": int(duration_sec * 1000),
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+
+        with open(self.timing_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+
     def load_chunks(self) -> List[Chunk]:
         """Load all chunks from chunks.jsonl."""
         chunks = []
@@ -378,8 +972,8 @@ class IngestionPipeline:
                         try:
                             entry = RegistryEntry.from_jsonl(line)
                             doc_ids.add(entry.doc_id)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.warning(f"Failed to parse registry entry: {e}")
         return doc_ids
     
     def _remove_doc_chunks(self, doc_id: str) -> int:
@@ -401,7 +995,8 @@ class IngestionPipeline:
                         removed += 1
                     else:
                         remaining.append(line)
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Failed to parse chunk line during removal: {e}")
                     remaining.append(line)
         
         # Rewrite file without removed chunks
@@ -429,8 +1024,8 @@ class IngestionPipeline:
                         chunk = Chunk.from_jsonl(line)
                         if chunk.doc_id == doc_id:
                             chunk_ids_to_remove.append(chunk.chunk_id)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Failed to parse chunk line during index cleanup: {e}")
         
         if chunk_ids_to_remove:
             self.index.delete(chunk_ids_to_remove)
@@ -469,12 +1064,7 @@ class IngestionPipeline:
             logger.info(f"Removed doc_id={doc_id} from registry")
         
         return removed
-    
-    # Keep old method for backwards compatibility (deprecated)
-    def _remove_from_index(self, doc_id: str) -> int:
-        """Deprecated: Use _remove_from_index_by_doc_id instead."""
-        return self._remove_from_index_by_doc_id(doc_id)
-    
+
     def _get_image_hashes_for_doc(self, doc_id: str) -> List[str]:
         """
         Collect image hashes from chunks.jsonl for a doc_id.

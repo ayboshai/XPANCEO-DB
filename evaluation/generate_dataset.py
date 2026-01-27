@@ -10,6 +10,7 @@ import logging
 import os
 import random
 import sys
+import re
 from pathlib import Path
 from typing import List, Tuple, Dict,  Optional
 
@@ -82,7 +83,7 @@ class DatasetGenerator:
         self,
         chunks: List[Chunk],
         num_questions: int = 20,
-        use_ragas: bool = True,
+        use_ragas: bool = False,
         require_ragas: bool = False,  # If True, fail if RAGAS unavailable
     ) -> List[DatasetEntry]:
         """
@@ -119,18 +120,42 @@ class DatasetGenerator:
         # Fallback to custom LLM generation
         logger.warning("📝 Using custom LLM generator (not RAGAS) for dataset generation")
         
-        # Sample chunks
-        sample_size = min(len(chunks), num_questions * 2)
+        def _is_clean_text_chunk(c: Chunk) -> bool:
+            if getattr(c.metadata, "processing_status", "success") != "success":
+                return False
+            if c.type != "text":
+                return False
+            if not c.content or not c.content.strip():
+                return False
+            text = c.content.strip()
+            lower = text.lower()
+            if "unreadable" in lower:
+                return False
+            if lower.startswith("[image processing failed"):
+                return False
+            if len(text) < 200:
+                return False
+            pipe_ratio = text.count("|") / max(1, len(text))
+            if pipe_ratio > 0.01:
+                return False
+            return True
+
+        # Filter to clean, successful TEXT chunks only
+        chunks = [c for c in chunks if _is_clean_text_chunk(c)]
+
+        # Sample chunks (oversample to allow validation filtering)
+        sample_size = min(len(chunks), num_questions * 15)
         if sample_size == 0:
             logger.error("No chunks available for question generation")
             return []
         
         sampled = random.sample(chunks, sample_size)
         
-        for chunk in sampled[:num_questions]:
+        for chunk in sampled:
             try:
                 question, expected = self._generate_qa_pair(chunk)
-                if question:
+                # Validate expected answer appears in source content
+                if question and expected and self._answer_in_content(expected, chunk.content, strict=True):
                     entries.append(DatasetEntry(
                         question=question,
                         slice="overall",
@@ -138,6 +163,8 @@ class DatasetGenerator:
                         expected_answer=expected,
                         doc_id=chunk.doc_id,
                     ))
+                    if len(entries) >= num_questions:
+                        break
             except Exception as e:
                 logger.warning(f"Failed to generate question: {e}")
         
@@ -204,19 +231,25 @@ class DatasetGenerator:
         num_questions: int = 10,
     ) -> List[DatasetEntry]:
         """Generate questions specifically about tables."""
-        table_chunks = [c for c in chunks if c.type == "table"]
+        table_chunks = [
+            c for c in chunks
+            if c.type == "table"
+            and c.content and c.content.strip()
+            and getattr(c.metadata, "processing_status", "success") == "success"
+        ]
         
         if not table_chunks:
             logger.warning("No table chunks found")
             return []
         
         entries = []
-        sampled = random.sample(table_chunks, min(len(table_chunks), num_questions))
+        sampled = random.sample(table_chunks, min(len(table_chunks), num_questions * 4))
         
         for chunk in sampled:
             try:
                 question, expected = self._generate_table_question(chunk)
-                if question:
+                # Validate expected answer appears in table content
+                if question and expected and self._answer_in_content(expected, chunk.content):
                     entries.append(DatasetEntry(
                         question=question,
                         slice="table",
@@ -224,6 +257,8 @@ class DatasetGenerator:
                         expected_answer=expected,
                         doc_id=chunk.doc_id,
                     ))
+                    if len(entries) >= num_questions:
+                        break
             except Exception as e:
                 logger.warning(f"Failed to generate table question: {e}")
         
@@ -235,19 +270,30 @@ class DatasetGenerator:
         num_questions: int = 10,
     ) -> List[DatasetEntry]:
         """Generate questions about images."""
-        image_chunks = [c for c in chunks if c.type in ("image_ocr", "image_caption")]
+        image_chunks = [
+            c for c in chunks
+            if c.type in ("image_ocr", "image_caption")
+            and c.content and c.content.strip()
+            and getattr(c.metadata, "processing_status", "success") == "success"
+        ]
         
         if not image_chunks:
             logger.warning("No image chunks found")
             return []
         
         entries = []
-        sampled = random.sample(image_chunks, min(len(image_chunks), num_questions))
+        seen_questions = set()
+        # Oversample more aggressively because strict validation filters harder
+        sampled = random.sample(image_chunks, min(len(image_chunks), num_questions * 8))
         
         for chunk in sampled:
             try:
                 question, expected = self._generate_image_question(chunk)
-                if question:
+                # Validate expected answer appears in caption/OCR content
+                if question and expected and self._answer_in_content(expected, chunk.content, strict=True):
+                    if question in seen_questions:
+                        continue
+                    seen_questions.add(question)
                     entries.append(DatasetEntry(
                         question=question,
                         slice="image",
@@ -255,10 +301,38 @@ class DatasetGenerator:
                         expected_answer=expected,
                         doc_id=chunk.doc_id,
                     ))
+                    if len(entries) >= num_questions:
+                        break
             except Exception as e:
                 logger.warning(f"Failed to generate image question: {e}")
         
         return entries
+
+    def _answer_in_content(self, expected: str, content: str, strict: bool = False) -> bool:
+        """
+        Looser validation: accept if expected answer appears verbatim OR
+        if there is token overlap (>=2 tokens length>3).
+        """
+        if not expected or not content:
+            return False
+
+        exp = expected.strip().lower()
+        if not exp:
+            return False
+        cont = content.lower()
+        if exp in cont:
+            return True
+
+        if strict:
+            return False
+
+        # Token overlap heuristic
+        exp_tokens = [t for t in re.split(r"\W+", exp) if len(t) > 3]
+        if not exp_tokens:
+            return False
+
+        overlap = sum(1 for t in exp_tokens if t in cont)
+        return overlap >= 2
     
     def generate_no_answer_slice(
         self,
@@ -297,6 +371,13 @@ class DatasetGenerator:
     
     def _generate_qa_pair(self, chunk: Chunk) -> Tuple[Optional[str], Optional[str]]:
         """Generate question-answer pair from chunk content."""
+        # Prefer deterministic, anchored questions to avoid generic/unsatisfiable prompts
+        anchored = self._anchor_text_span(chunk.content)
+        if anchored:
+            anchor, span = anchored
+            question = f'In the text, what phrase includes "{anchor}"?'
+            return question, span
+
         prompt = f"""Based on the following text, generate a single factual question and its correct answer.
 The question should be answerable ONLY from this text.
 
@@ -346,10 +427,24 @@ Respond in JSON format:
             return data.get("question"), data.get("answer")
         except json.JSONDecodeError:
             return None, None
+
     
     def _generate_image_question(self, chunk: Chunk) -> Tuple[Optional[str], Optional[str]]:
         """Generate question about image content."""
-        prompt = f"""Based on this image description/OCR text, generate a question about what the image shows.
+        # Prefer deterministic, anchored questions to avoid generic/unsatisfiable prompts
+        anchored = self._anchor_image_span(chunk.content)
+        if anchored:
+            anchor, span = anchored
+            question = f'In the image, what phrase includes "{anchor}"?'
+            return question, span
+
+        prompt = f"""You are generating an evaluation question from image content.
+CRITICAL RULES:
+- The answer MUST be an exact short quote copied from the provided content.
+- Do NOT ask about anything that is not explicitly present in the content.
+- Prefer concrete entities, labels, axis names, or short statements that can be quoted verbatim.
+- The question MUST explicitly mention that it is about an image (include the word "image").
+- If the content is unclear or too generic, return empty JSON: {{}}.
 
 Image content:
 {chunk.content[:1500]}
@@ -370,6 +465,128 @@ Respond in JSON format:
             return data.get("question"), data.get("answer")
         except json.JSONDecodeError:
             return None, None
+
+    def _anchor_image_span(self, content: str) -> Optional[Tuple[str, str]]:
+        """
+        Build a specific, answerable QA pair by anchoring on a concrete token.
+        Returns (anchor_token, answer_span) where answer_span is a verbatim substring.
+        """
+        if not content or not content.strip():
+            return None
+
+        # Prefer anchors with digits or uppercase (more distinctive for retrieval)
+        pattern = re.compile(r"[A-Za-zА-Яа-я0-9%µμ]{4,}")
+        matches = list(pattern.finditer(content))
+        if not matches:
+            return None
+
+        def is_strong_anchor(s: str) -> bool:
+            return any(ch.isdigit() for ch in s) or (len(s) >= 4 and any(ch.isupper() for ch in s))
+
+        strong = [m for m in matches if is_strong_anchor(m.group(0))]
+        if not strong:
+            return None
+        match = strong[0]
+        anchor = match.group(0)
+
+        # Expand to a nearby sentence/line boundary to keep a clean span
+        start = max(content.rfind("\n", 0, match.start()), content.rfind(".", 0, match.start()))
+        start = 0 if start < 0 else start + 1
+
+        end_candidates = [content.find("\n", match.end()), content.find(".", match.end())]
+        end_candidates = [e for e in end_candidates if e >= 0]
+        end = min(end_candidates) if end_candidates else len(content)
+
+        span = content[start:end].strip()
+
+        # Fallback to a tight window if the boundary span is too long/short
+        if len(span) < len(anchor) or len(span) > 240:
+            window = 120
+            s = max(0, match.start() - window // 2)
+            e = min(len(content), match.end() + window // 2)
+            span = content[s:e].strip()
+
+        if not span or anchor.lower() not in span.lower():
+            return None
+
+        return anchor, span
+
+    def _anchor_text_span(self, content: str) -> Optional[Tuple[str, str]]:
+        """
+        Deterministically pick an anchor token and nearby span for general text chunks.
+        Keeps overall questions grounded in the actual chunk content.
+        """
+        if not content:
+            return None
+
+        text = content.strip()
+        if len(text) < 80:
+            return None
+        lower = text.lower()
+        if "unreadable" in lower:
+            return None
+        pipe_ratio = text.count("|") / max(1, len(text))
+        if pipe_ratio > 0.01:
+            return None
+
+        tokens = re.findall(r"[A-Za-zА-Яа-я0-9%µμ]{4,}", text)
+        if not tokens:
+            return None
+
+        stopwords = {
+            "table", "таблица", "figure", "рисунок", "chart", "diagram",
+            "this", "that", "with", "from", "were", "have", "has",
+            "using", "used", "into", "between", "within", "their",
+        }
+
+        def score(tok: str) -> int:
+            t = tok.strip()
+            lower = t.lower()
+            if lower in stopwords:
+                return -1
+            s = 0
+            if any(ch.isdigit() for ch in t):
+                s += 4
+            if sum(1 for ch in t if ch.isupper()) >= 2:
+                s += 2
+            if len(t) >= 8:
+                s += 1
+            return s
+
+        ranked = sorted(tokens, key=score, reverse=True)
+        anchor = ranked[0]
+        if score(anchor) < 1:
+            return None
+
+        idx = text.lower().find(anchor.lower())
+        if idx == -1:
+            return None
+
+        left_nl = text.rfind("\n", 0, idx)
+        left_dot = text.rfind(".", 0, idx)
+        left = max(left_nl, left_dot)
+        left = 0 if left == -1 else left + 1
+
+        right_nl = text.find("\n", idx)
+        right_dot = text.find(".", idx)
+        candidates = [p for p in (right_nl, right_dot) if p != -1]
+        right = min(candidates) if candidates else -1
+        right = len(text) if right == -1 else right + 1
+
+        span = text[left:right].strip()
+        if len(span) < 40:
+            window = 180
+            start = max(0, idx - window // 3)
+            end = min(len(text), idx + window)
+            span = text[start:end].strip()
+
+        if anchor.lower() not in span.lower():
+            return None
+
+        if len(span) > 160:
+            span = span[:160].rstrip()
+
+        return anchor, span
     
     def generate_full_dataset(
         self,
@@ -378,6 +595,7 @@ Respond in JSON format:
         table_count: int = 10,
         image_count: int = 10,
         no_answer_count: int = 10,
+        use_ragas: bool = False,
         min_ratio: float = 0.5,  # Warn if less than 50% of target achieved
         strict: bool = False,  # If True, raise error when slices below min_ratio
     ) -> List[DatasetEntry]:
@@ -393,7 +611,7 @@ Respond in JSON format:
         warnings = []
         
         logger.info("Generating overall questions...")
-        overall_entries = self.generate_overall(chunks, overall_count)
+        overall_entries = self.generate_overall(chunks, overall_count, use_ragas=use_ragas)
         entries.extend(overall_entries)
         if len(overall_entries) < overall_count * min_ratio:
             warnings.append(f"overall: {len(overall_entries)}/{overall_count} (below {min_ratio*100:.0f}% target)")
@@ -435,15 +653,79 @@ Respond in JSON format:
         return entries
 
 
-def save_dataset(entries: List[DatasetEntry], output_path: str) -> None:
-    """Save dataset to JSONL file."""
+def compute_chunks_hash(chunks_file: str) -> str:
+    """Compute MD5 hash of chunks.jsonl for validation."""
+    import hashlib
+
+    hasher = hashlib.md5()
+    with open(chunks_file, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def save_dataset(entries: List[DatasetEntry], output_path: str, chunks_file: str = "data/chunks.jsonl") -> None:
+    """
+    Save dataset to JSONL file with metadata for validation.
+
+    Creates dataset.meta.json alongside dataset.jsonl with:
+    - chunks_hash: MD5 of chunks.jsonl
+    - chunks_count: Number of chunks
+    - ingest_ts: Timestamp from first chunk
+    """
+    import hashlib
+    from datetime import datetime
+
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    
+
+    # Save dataset entries
     with open(output_path, "w", encoding="utf-8") as f:
         for entry in entries:
             f.write(entry.to_jsonl() + "\n")
-    
+
     logger.info(f"Saved {len(entries)} entries to {output_path}")
+
+    # Compute chunks hash for validation (if available)
+    if os.path.exists(chunks_file):
+        chunks_hash = compute_chunks_hash(chunks_file)
+    else:
+        chunks_hash = None
+        logger.warning(f"chunks.jsonl not found at {chunks_file}; skipping hash in metadata")
+
+    # Get chunks count and timestamp
+    chunks_count = 0
+    ingest_ts = None
+    if os.path.exists(chunks_file):
+        with open(chunks_file, "r") as f:
+            for i, line in enumerate(f):
+                chunks_count += 1
+                if i == 0 and line.strip():
+                    # Get timestamp from first chunk
+                    try:
+                        chunk_data = json.loads(line)
+                        ingest_ts = chunk_data.get("metadata", {}).get("ingest_ts")
+                    except:
+                        pass
+
+    # Save metadata
+    meta_path = output_path.replace(".jsonl", ".meta.json")
+    meta = {
+        "dataset_path": output_path,
+        "chunks_file": chunks_file,
+        "chunks_hash": chunks_hash,
+        "chunks_count": chunks_count,
+        "ingest_ts": ingest_ts,
+        "dataset_count": len(entries),
+        "created_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
+
+    if chunks_hash:
+        logger.info(f"Saved metadata to {meta_path} (chunks_hash={chunks_hash[:8]}...)")
+    else:
+        logger.info(f"Saved metadata to {meta_path} (chunks_hash=none)")
 
 
 def load_dataset(input_path: str) -> List[DatasetEntry]:

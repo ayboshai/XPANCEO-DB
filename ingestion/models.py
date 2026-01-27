@@ -16,14 +16,21 @@ from pydantic import BaseModel, Field, field_validator
 
 class ChunkMetadata(BaseModel):
     """Metadata for a chunk - tracks source, OCR status, linking."""
-    
+
     source_path: Optional[str] = None
     bbox: Optional[List[float]] = None
     image_hash: Optional[str] = None
+    # Strict image type validation - only 5 valid types
+    image_type: Optional[Literal["text_scan", "table_scan", "chart", "diagram", "photo"]] = None
     ocr_confidence: Optional[float] = None
     ocr_failed: bool = False
     ocr_failed_reason: Optional[str] = None
     vision_used: bool = False
+    # Processing status for failure tracking
+    processing_status: Literal["success", "failed"] = "success"
+    vision_error: Optional[str] = None  # Error message if Vision failed
+    ocr_error: Optional[str] = None     # Error message if OCR failed
+    table_source: Optional[Literal["pdfplumber", "ocr"]] = None  # For table chunks
     prev_chunk_id: Optional[str] = None
     next_chunk_id: Optional[str] = None
     ingest_ts: str = Field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")

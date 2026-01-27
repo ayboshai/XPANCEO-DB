@@ -10,9 +10,11 @@ import os
 import sys
 
 # Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
 
 import yaml
+from dotenv import load_dotenv
 from tqdm import tqdm
 
 from ingestion.embedder import create_embedder
@@ -21,18 +23,22 @@ from ingestion.pipeline import IngestionPipeline
 
 
 def load_config(config_path: str = "config/master_config.yaml") -> dict:
-    """Load configuration from YAML file."""
+    """Load configuration from YAML file. .env takes priority over system env."""
+    env_path = os.path.join(PROJECT_ROOT, ".env")
+    if os.path.exists(env_path):
+        load_dotenv(env_path, override=True)
+
     def resolve_env(value):
         if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
             return os.getenv(value[2:-1], "")
         return value
-    
+
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
-    
+
     for key, value in config.items():
         config[key] = resolve_env(value)
-    
+
     return config
 
 
@@ -106,13 +112,16 @@ def main():
     for i in tqdm(range(0, len(chunks), batch_size), desc="Batches"):
         batch = chunks[i:i + batch_size]
         
-        # Filter non-empty content
-        valid_chunks = [c for c in batch if c.content.strip()]
+        # Filter non-empty content and failed chunks (match ingestion behavior)
+        valid_chunks = [
+            c for c in batch
+            if c.content.strip() and c.metadata.processing_status == "success"
+        ]
         if not valid_chunks:
             continue
         
-        # Embed
-        texts = [c.content for c in valid_chunks]
+        # Embed (use same normalization as ingestion)
+        texts = [pipeline._normalize_for_embedding(c) for c in valid_chunks]
         ids = [c.chunk_id for c in valid_chunks]
         metadata = [
             {

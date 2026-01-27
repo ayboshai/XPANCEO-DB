@@ -48,7 +48,7 @@ class TestE2EPipeline:
         from evaluation.generate_dataset import DatasetGenerator
         from ingestion.models import Chunk, ChunkMetadata
         
-        # Create mock chunks
+        # Create sample chunks
         chunks = [
             Chunk(
                 doc_id="test",
@@ -60,37 +60,32 @@ class TestE2EPipeline:
             )
         ]
         
-        # Generator with fake API key (won't actually call API)
+        # Generator with fake API key (no API calls when use_ragas=False)
         gen = DatasetGenerator(api_key="test-key")
         
         # Should raise RuntimeError with require_ragas=True
         with pytest.raises(RuntimeError) as exc_info:
-            gen.generate_overall(chunks, num_questions=1, require_ragas=True)
+            gen.generate_overall(chunks, num_questions=1, use_ragas=False, require_ragas=True)
         
         assert "RAGAS required" in str(exc_info.value)
     
-    def test_strict_mode_raises_on_undercount(self, temp_dir):
-        """Verify strict mode raises ValueError on slice undercount."""
-        from evaluation.generate_dataset import DatasetGenerator
-        from ingestion.models import Chunk, ChunkMetadata
-        
-        # Create minimal chunks (will undercount)
-        chunks = [
-            Chunk(
-                doc_id="test",
-                page=1,
-                chunk_id="test_1",
-                type="text",
-                content="Minimal test content.",
-                metadata=ChunkMetadata(),
-            )
-        ]
+    def test_no_answer_slice_roundtrip(self, temp_dir):
+        """Verify no-answer slice generation and dataset roundtrip."""
+        from evaluation.generate_dataset import DatasetGenerator, save_dataset, load_dataset
         
         gen = DatasetGenerator(api_key="test-key")
+        entries = gen.generate_no_answer_slice(num_questions=3)
         
-        # With strict=True and impossible targets, should fail
-        # We can't actually test this without API, so we just verify the flag exists
-        assert hasattr(gen, "generate_full_dataset")
+        assert len(entries) == 3
+        assert all(e.slice == "no-answer" for e in entries)
+        assert all(e.has_answer is False for e in entries)
+        
+        out_path = os.path.join(temp_dir, "dataset.jsonl")
+        save_dataset(entries, out_path)
+        loaded = load_dataset(out_path)
+        
+        assert len(loaded) == 3
+        assert loaded[0].slice == "no-answer"
     
     def test_cache_cleanup_extracts_image_hash(self):
         """Verify _get_image_hashes_for_doc extracts metadata.image_hash."""

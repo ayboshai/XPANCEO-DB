@@ -10,7 +10,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -36,6 +36,7 @@ class EvalRunner:
         dataset: List[DatasetEntry],
         output_dir: str,
         show_progress: bool = True,
+        progress_callback: Optional[Callable[[int, int, DatasetEntry], None]] = None,
     ) -> List[PredictionEntry]:
         """
         Run evaluation on dataset.
@@ -44,6 +45,7 @@ class EvalRunner:
             dataset: List of evaluation entries
             output_dir: Directory to save predictions
             show_progress: Show progress bar
+            progress_callback: Optional callback(current, total, dataset_entry)
             
         Returns:
             List of prediction entries
@@ -51,9 +53,11 @@ class EvalRunner:
         os.makedirs(output_dir, exist_ok=True)
         
         predictions = []
-        iterator = tqdm(dataset, desc="Running evaluation") if show_progress else dataset
+        total = len(dataset)
+        use_tqdm = show_progress and progress_callback is None
+        iterator = tqdm(dataset, desc="Running evaluation") if use_tqdm else dataset
         
-        for entry in iterator:
+        for i, entry in enumerate(iterator, start=1):
             try:
                 # Run RAG
                 response = self.rag_pipeline.query(entry.question)
@@ -73,6 +77,9 @@ class EvalRunner:
                     slice=entry.slice,
                     has_answer_pred=False,
                 ))
+            finally:
+                if progress_callback:
+                    progress_callback(i, total, entry)
         
         # Save predictions
         predictions_path = os.path.join(output_dir, "predictions.jsonl")
@@ -95,6 +102,7 @@ def run_evaluation(
     dataset_path: str,
     output_dir: Optional[str] = None,
     config_path: str = "config/master_config.yaml",
+    progress_callback: Optional[Callable[[int, int, DatasetEntry], None]] = None,
 ) -> List[PredictionEntry]:
     """
     Run full evaluation pipeline.
@@ -125,6 +133,11 @@ def run_evaluation(
     
     # Run evaluation
     runner = EvalRunner(rag_pipeline)
-    predictions = runner.run(dataset, output_dir)
+    predictions = runner.run(
+        dataset,
+        output_dir,
+        show_progress=progress_callback is None,
+        progress_callback=progress_callback,
+    )
     
     return predictions

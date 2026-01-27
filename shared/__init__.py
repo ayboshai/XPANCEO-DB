@@ -252,85 +252,99 @@ class ParallelismLimiter:
 
 # Global limiter
 _limiter: Optional[ParallelismLimiter] = None
+_limiter_sig: Optional[tuple] = None
 
 
 def get_limiter(config: Optional[dict] = None) -> ParallelismLimiter:
-    """Get or create parallelism limiter."""
+    """Return a cached async limiter, reinitializing only on config change."""
     global _limiter
-    if _limiter is None or config is not None:
+    global _limiter_sig
+
+    def _sig(cfg: Optional[dict]) -> tuple:
+        cfg = cfg or load_config()
+        return (
+            cfg.get("max_concurrent_embeddings", 5),
+            cfg.get("max_concurrent_vision", 2),
+        )
+
+    if _limiter is None:
         _limiter = ParallelismLimiter(config)
+        _limiter_sig = _sig(config)
+        return _limiter
+
+    if config is not None:
+        new_sig = _sig(config)
+        if new_sig != _limiter_sig:
+            logger.info(
+                "Reinitializing async limiter due to config change: "
+                f"{_limiter_sig} -> {new_sig}"
+            )
+            _limiter = ParallelismLimiter(config)
+            _limiter_sig = new_sig
+
     return _limiter
 
-
-# =============================================================================
-# Synchronous Rate Limiter (for sync embedder/captioner/judge)
-# =============================================================================
 
 import threading
 
 
 class SyncRateLimiter:
-    """
-    Synchronous rate limiter with semaphore for concurrent limits.
-    Thread-safe for use in multi-threaded contexts.
-    """
-    
+    """Thread-safe semaphore + RPM limiter for sync API calls."""
+
     def __init__(self, config: Optional[dict] = None):
         self.config = config or load_config()
-        
-        # Concurrency limits
+
         max_embed = self.config.get("max_concurrent_embeddings", 5)
         max_vision = self.config.get("max_concurrent_vision", 2)
         max_judge = self.config.get("max_concurrent_judge", 3)
-        
+
         self._embed_sem = threading.Semaphore(max_embed)
         self._vision_sem = threading.Semaphore(max_vision)
         self._judge_sem = threading.Semaphore(max_judge)
-        
-        # RPM-based rate limiting - GLOBAL key to prevent total burst
-        # All API calls share one limit to prevent combined exceeding RPM
+
+        # Single global RPM gate across API types.
         self.rpm = self.config.get("api_rate_limit_rpm", 500)
         self._min_delay = 60.0 / self.rpm if self.rpm > 0 else 0
-        self._last_api_call = 0.0  # Single global timestamp
+        self._last_api_call = 0.0
         self._lock = threading.Lock()
-    
+
     def _wait_for_rate_limit(self) -> None:
-        """Wait if needed to respect global rate limit (shared across all API types)."""
+        """Sleep to respect the shared RPM budget."""
         if self._min_delay <= 0:
             return
-        
+
         with self._lock:
             now = time.time()
             elapsed = now - self._last_api_call
-            
+
             if elapsed < self._min_delay:
                 time.sleep(self._min_delay - elapsed)
-            
+
             self._last_api_call = time.time()
-    
+
     def acquire_embedding(self) -> None:
-        """Acquire embedding slot (blocks if at limit)."""
+        """Acquire embedding slot."""
         self._embed_sem.acquire()
         self._wait_for_rate_limit()
-    
+
     def release_embedding(self) -> None:
         """Release embedding slot."""
         self._embed_sem.release()
-    
+
     def acquire_vision(self) -> None:
-        """Acquire vision slot (blocks if at limit)."""
+        """Acquire vision slot."""
         self._vision_sem.acquire()
         self._wait_for_rate_limit()
-    
+
     def release_vision(self) -> None:
         """Release vision slot."""
         self._vision_sem.release()
-    
+
     def acquire_judge(self) -> None:
-        """Acquire judge slot (blocks if at limit)."""
+        """Acquire judge slot."""
         self._judge_sem.acquire()
         self._wait_for_rate_limit()
-    
+
     def release_judge(self) -> None:
         """Release judge slot."""
         self._judge_sem.release()
@@ -338,11 +352,43 @@ class SyncRateLimiter:
 
 # Global sync limiter
 _sync_limiter: Optional[SyncRateLimiter] = None
+_sync_limiter_sig: Optional[tuple] = None
+_sync_limiter_lock = threading.Lock()
 
 
 def get_sync_limiter(config: Optional[dict] = None) -> SyncRateLimiter:
-    """Get or create sync rate limiter."""
+    """Return a cached sync limiter, reinitializing only on config change."""
     global _sync_limiter
-    if _sync_limiter is None or config is not None:
-        _sync_limiter = SyncRateLimiter(config)
-    return _sync_limiter
+    global _sync_limiter_sig
+
+    def _sig(cfg: Optional[dict]) -> tuple:
+        cfg = cfg or load_config()
+        return (
+            cfg.get("max_concurrent_embeddings", 5),
+            cfg.get("max_concurrent_vision", 2),
+            cfg.get("max_concurrent_judge", 3),
+            cfg.get("api_rate_limit_rpm", 500),
+        )
+
+    with _sync_limiter_lock:
+        if _sync_limiter is None:
+            _sync_limiter = SyncRateLimiter(config)
+            _sync_limiter_sig = _sig(config)
+            logger.info(
+                "Initialized sync limiter: "
+                f"embed={_sync_limiter_sig[0]} vision={_sync_limiter_sig[1]} "
+                f"judge={_sync_limiter_sig[2]} rpm={_sync_limiter_sig[3]}"
+            )
+            return _sync_limiter
+
+        if config is not None:
+            new_sig = _sig(config)
+            if new_sig != _sync_limiter_sig:
+                logger.info(
+                    "Reinitializing sync limiter due to config change: "
+                    f"{_sync_limiter_sig} -> {new_sig}"
+                )
+                _sync_limiter = SyncRateLimiter(config)
+                _sync_limiter_sig = new_sig
+
+        return _sync_limiter

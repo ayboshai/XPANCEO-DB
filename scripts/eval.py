@@ -8,27 +8,35 @@ import argparse
 import logging
 import os
 import sys
+import json
 from datetime import datetime
 
 # Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
 
 import yaml
+from dotenv import load_dotenv
 
 
 def load_config(config_path: str = "config/master_config.yaml") -> dict:
-    """Load configuration from YAML file."""
+    """Load configuration from YAML file. .env takes priority over system env."""
+    # Load .env with override to prioritize local config
+    env_path = os.path.join(PROJECT_ROOT, ".env")
+    if os.path.exists(env_path):
+        load_dotenv(env_path, override=True)
+
     def resolve_env(value):
         if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
             return os.getenv(value[2:-1], "")
         return value
-    
+
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
-    
+
     for key, value in config.items():
         config[key] = resolve_env(value)
-    
+
     return config
 
 
@@ -168,11 +176,41 @@ Examples:
         if not dataset_path:
             print("Error: No dataset specified. Use --dataset or --generate-dataset")
             sys.exit(1)
-        
+
         if not os.path.exists(dataset_path):
             print(f"Error: Dataset not found: {dataset_path}")
             sys.exit(1)
-        
+
+        # VALIDATE: Check chunks.jsonl matches dataset metadata
+        meta_path = dataset_path.replace(".jsonl", ".meta.json")
+        if os.path.exists(meta_path):
+            with open(meta_path, "r") as f:
+                meta = json.load(f)
+
+            chunks_file = meta.get("chunks_file", "data/chunks.jsonl")
+            if os.path.exists(chunks_file):
+                from evaluation.generate_dataset import compute_chunks_hash
+                current_hash = compute_chunks_hash(chunks_file)
+                expected_hash = meta.get("chunks_hash")
+
+                if current_hash != expected_hash:
+                    print(f"\n⚠️  WARNING: chunks.jsonl mismatch detected!")
+                    print(f"   Dataset was generated from: {expected_hash[:8]}...")
+                    print(f"   Current chunks.jsonl hash: {current_hash[:8]}...")
+                    print(f"   Dataset created: {meta.get('created_at')}")
+                    print(f"   Chunks ingest_ts: {meta.get('ingest_ts')}")
+                    print(f"\n   This eval will use DIFFERENT chunks than dataset was generated from!")
+                    print(f"   Consider regenerating dataset with --generate-dataset\n")
+
+                    response = input("   Continue anyway? (y/N): ")
+                    if response.lower() != 'y':
+                        print("   Aborted.")
+                        sys.exit(1)
+                else:
+                    print(f"✅ chunks.jsonl validation: MATCH ({current_hash[:8]}...)")
+            else:
+                print(f"⚠️  Warning: chunks.jsonl not found at {chunks_file}")
+
         print(f"\n🔍 Running evaluation...")
         print(f"   Dataset: {dataset_path}")
         print(f"   Output: {out_dir}")

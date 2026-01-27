@@ -1,233 +1,157 @@
-# XPANCEO DB: Multimodal RAG for Technical PDFs
+# Multimodal RAG for Technical PDFs
 
-> **Deterministic, modular RAG system** for answering questions about technical PDF documents containing text, tables, and images.
+A small, deterministic RAG system that can answer questions over PDFs with text, tables, and images, plus an automatic evaluation pipeline.
 
-![Python](https://img.shields.io/badge/Python-3.10+-blue)
-![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4o--mini-green)
-![FAISS](https://img.shields.io/badge/Vector%20Index-FAISS-orange)
+Design goals:
+- no data loss,
+- simple architecture,
+- reproducible metrics,
+- easy to run and debug.
 
----
+Authoritative engineering contract: `master_specification.md`.
 
-## 🎯 Features
+## 1) What It Does
 
-- **📄 PDF Ingestion**: Parses text, tables, and images using Unstructured
-- **🔍 OCR-First Strategy**: Tesseract OCR with GPT-4o-mini Vision fallback
-- **🧠 RAG Pipeline**: Vector search (FAISS) + LLM generation with source citations
-- **🚫 No-Answer Detection**: Explicitly refuses to answer when context insufficient
-- **📊 Auto-Evaluation**: LLM-as-Judge with metrics per slice (overall/table/image/no-answer)
-- **🖥️ Streamlit UI**: Modern dark theme chat interface
+The system has three modules:
+1. Ingestion: PDF -> chunks -> vector index.
+2. RAG: query -> retrieval -> answer with citations.
+3. Evaluation: dataset generation -> automatic judging -> metrics.
 
----
+Key behavior:
+- tables stay readable for LLMs,
+- visual content uses Vision by default,
+- failed chunks are kept for audit but excluded from the index.
 
-## 🚀 Quick Start
+## 2) Requirements
 
-### 1. Prerequisites
+System packages (Ubuntu/Debian):
 
 ```bash
-# Install system dependencies
-# Ubuntu/Debian
-sudo apt-get install -y tesseract-ocr tesseract-ocr-eng tesseract-ocr-rus poppler-utils
-
-# macOS
-brew install tesseract poppler
+sudo apt-get update
+sudo apt-get install -y poppler-utils tesseract-ocr tesseract-ocr-eng tesseract-ocr-rus
 ```
 
-### 2. Install Python Dependencies
+Python:
+- Python 3.10+
+
+## 3) Setup
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+export OPENAI_API_KEY=YOUR_KEY
 ```
 
-### 3. Configure API Key
+## 4) Quick Smoke Test (5%)
+
+This is the fastest reliable loop after any change.
 
 ```bash
-export OPENAI_API_KEY="your-api-key-here"
+python3 - <<'PY'
+import shutil
+from pathlib import Path
+path = Path('data/iter_10a')
+if path.exists():
+    shutil.rmtree(path)
+print('cleaned', not path.exists())
+PY
+
+python3 scripts/ingest.py test_subset_5d --config config/iter_10a.yaml
+
+python3 scripts/generate_dataset.py \
+  --config config/iter_10a.yaml \
+  --out evaluation/datasets/iter_10a_small.jsonl \
+  --overall-count 6 --table-count 4 --image-count 4 --no-answer-count 6
+
+python3 scripts/eval.py \
+  --config config/iter_10a.yaml \
+  --dataset evaluation/datasets/iter_10a_small.jsonl
 ```
 
-### 4. Ingest PDFs
+## 5) Controlled 10% Run
 
 ```bash
-# Download sample PDFs
-git clone https://github.com/xpanceo-team/x-trial /tmp/x-trial
+python3 - <<'PY'
+import shutil
+from pathlib import Path
+path = Path('data/iter_10a')
+if path.exists():
+    shutil.rmtree(path)
+print('cleaned', not path.exists())
+PY
 
-# Ingest
-python scripts/ingest.py /tmp/x-trial/pdf
+python3 scripts/ingest.py test_subset_10a --config config/iter_10a.yaml
+
+python3 scripts/generate_dataset.py \
+  --config config/iter_10a.yaml \
+  --out evaluation/datasets/iter_10a_small.jsonl \
+  --overall-count 6 --table-count 4 --image-count 4 --no-answer-count 6
+
+python3 scripts/eval.py \
+  --config config/iter_10a.yaml \
+  --dataset evaluation/datasets/iter_10a_small.jsonl
 ```
 
-### 5. Chat with Documents
+## 6) Sanity Checks (Required)
+
+Unsupported formats must be gone:
 
 ```bash
-# CLI mode
-python scripts/chat.py
+find data/iter_10a/cache/images -type f \
+  \( -name "*.jb2e" -o -name "*.jp2" -o -name "*.ppm" -o -name "*.pbm" -o -name "*.pgm" \)
+```
 
-# Or single query
-python scripts/chat.py --query "What is the main topic of the paper?"
+Index integrity must hold:
 
-# Or Streamlit UI
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+from ingestion.index_faiss import FAISSIndex
+
+chunks = [json.loads(l) for l in Path('data/iter_10a/chunks.jsonl').read_text().splitlines() if l.strip()]
+success_nonempty = sum(
+    1 for c in chunks
+    if c.get('metadata', {}).get('processing_status') == 'success' and (c.get('content') or '').strip()
+)
+idx = FAISSIndex(index_dir='data/iter_10a/index', dimension=1536)
+print({'success_nonempty': success_nonempty, 'index_ntotal': idx.index.ntotal, 'diff': idx.index.ntotal - success_nonempty})
+PY
+```
+
+## 7) Chat / UI
+
+CLI chat:
+
+```bash
+python3 scripts/chat.py --config config/iter_10a.yaml
+```
+
+Streamlit UI (optional):
+
+```bash
 streamlit run ui/app.py
 ```
 
-### 6. Run Evaluation
+UI notes:
+- The UI is pinned to a single stable config (`config/iter_10a.yaml`).
+- It shows evaluation metrics by slice: overall / table / image / no-answer.
+- It can generate a dataset and run evaluation from the sidebar.
+- Ingestion shows live progress by stage (parse → images → embed/index).
 
-```bash
-# Generate dataset + evaluate
-python scripts/eval.py --generate-dataset --run-eval
+## 8) Project Map
 
-# Check results
-cat evaluation/runs/*/report.md
-```
+Core modules:
+- `ingestion/parser.py`
+- `ingestion/ocr.py`
+- `ingestion/captioner.py`
+- `ingestion/pipeline.py`
+- `rag/retriever.py`
+- `rag/generator.py`
+- `evaluation/*`
+- `scripts/*`
 
----
-
-## 📁 Project Structure
-
-```
-xpanceo-db/
-├── config/
-│   └── master_config.yaml     # All tunables
-├── data/
-│   ├── chunks.jsonl           # Indexed chunks
-│   ├── pdf_registry.jsonl     # Per-doc stats
-│   └── cache/                 # OCR/Vision/Embedding caches
-├── ingestion/
-│   ├── models.py              # Pydantic schemas
-│   ├── parser.py              # PDF parsing (Unstructured + PyPDF2 fallback)
-│   ├── ocr.py                 # Tesseract OCR + heuristics
-│   ├── captioner.py           # GPT-4o-mini Vision fallback
-│   ├── chunker.py             # Text/table chunking
-│   ├── embedder.py            # OpenAI embeddings
-│   ├── index_faiss.py         # FAISS vector index
-│   └── pipeline.py            # Orchestration
-├── rag/
-│   ├── retriever.py           # Vector search + optional BM25
-│   ├── generator.py           # LLM answering with no-answer guard
-│   └── pipeline.py            # End-to-end Q&A
-├── ui/
-│   └── app.py                 # Streamlit interface
-├── evaluation/
-│   ├── generate_dataset.py    # Create test questions
-│   ├── eval_runner.py         # Run RAG on dataset
-│   ├── judge.py               # LLM-as-Judge
-│   ├── metrics.py             # Calculate metrics
-│   └── report.py              # Generate reports
-├── scripts/
-│   ├── ingest.py              # CLI: ingest PDFs
-│   ├── chat.py                # CLI: Q&A
-│   ├── reindex.py             # CLI: rebuild index
-│   ├── eval.py                # CLI: run evaluation
-│   └── generate_dataset.py    # CLI: create dataset
-├── tests/                     # Smoke tests
-├── master_specification.md    # Authoritative spec
-└── README.md
-```
-
----
-
-## 🎨 Design Decisions
-
-### Why OCR-First + Vision Fallback?
-
-- **Deterministic**: Tesseract OCR produces consistent results
-- **Cost-efficient**: Vision API only used when OCR quality is low
-- **Transparent**: Clear criteria for OCR failure (confidence < 60, chars < 50, tokens < 10, alpha_ratio < 0.4)
-
-### Why FAISS?
-
-- **Simplicity**: Local file-based index, no server required
-- **Sufficient for MVP**: Up to 1M vectors on single machine
-- **Zero dependencies**: No external services
-
-> ℹ️ **Note**: Only FAISS is supported. Other backends (e.g., Qdrant) are not implemented.
-
-### Why No Rerankers/Agents?
-
-- **Predictable behavior**: Simple retrieval + generation
-- **Debuggable**: Easy to trace what chunks were used
-- **Faster iteration**: Less complexity = faster development
-
-### Why Self-Implemented Judge?
-
-- **Full control**: Prompts tuned for our specific use case
-- **Consistent metrics**: Same scoring across all slices
-- **No external dependencies**: Only OpenAI API
-
----
-
-## 📊 Evaluation Metrics
-
-| Metric | Description |
-|--------|-------------|
-| **Faithfulness** | Does answer only use facts from context? |
-| **Relevancy** | Does answer address the question? |
-| **Context Precision** | Are retrieved chunks relevant? |
-| **Context Recall** | Does context have all needed info? |
-| **No-Answer Accuracy** | Does system correctly refuse? |
-| **False Positive Rate** | Does system wrongly answer no-answer questions? |
-
-Metrics are calculated per slice: `overall`, `table`, `image`, `no-answer`
-
----
-
-## 🔧 Configuration
-
-All settings in `config/master_config.yaml`:
-
-```yaml
-# Models
-model_chat: gpt-4o-mini
-model_vision: gpt-4o-mini
-model_embed: text-embedding-3-small
-
-# Index
-index_backend: faiss
-top_k: 5
-
-# OCR Thresholds
-ocr_confidence_threshold: 60
-ocr_min_chars: 50
-ocr_min_tokens: 10
-ocr_min_alpha_ratio: 0.4
-
-# API Resilience
-api_max_retries: 3
-api_backoff_base: 2.0
-```
-
----
-
-## 🐳 Docker
-
-```bash
-# Build
-docker build -t xpanceo-db .
-
-# Run with API key
-docker run -e OPENAI_API_KEY=$OPENAI_API_KEY -p 8501:8501 xpanceo-db
-```
-
----
-
-## 📝 Commands Reference
-
-| Command | Description |
-|---------|-------------|
-| `python scripts/ingest.py <folder>` | Ingest PDFs from folder |
-| `python scripts/chat.py` | Interactive Q&A |
-| `python scripts/chat.py -q "..."` | Single query |
-| `python scripts/reindex.py` | Rebuild index from chunks |
-| `python scripts/generate_dataset.py` | Create eval dataset |
-| `python scripts/eval.py --run-eval` | Run full evaluation |
-| `streamlit run ui/app.py` | Launch web UI |
-
----
-
-## 📄 License
-
-MIT License
-
----
-
-## 🔗 Links
-
-- [Master Specification](./master_specification.md)
-- [Test PDFs](https://github.com/xpanceo-team/x-trial)
+If you only read two files, read:
+- `master_specification.md`
+- `ingestion/pipeline.py`

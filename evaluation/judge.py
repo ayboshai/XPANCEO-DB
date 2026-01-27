@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import sys
-from typing import List, Tuple, Dict,  Optional
+from typing import List, Tuple, Dict, Optional, Callable
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -220,6 +220,7 @@ class LLMJudge:
         dataset: Optional[List[DatasetEntry]] = None,
         output_dir: Optional[str] = None,
         show_progress: bool = True,
+        progress_callback: Optional[Callable[[int, int, PredictionEntry], None]] = None,
     ) -> List[JudgeResponse]:
         """
         Judge all predictions.
@@ -240,12 +241,18 @@ class LLMJudge:
                 expected_lookup[entry.question] = entry
         
         responses = []
-        iterator = tqdm(predictions, desc="Judging") if show_progress else predictions
+        total = len(predictions)
+        use_tqdm = show_progress and progress_callback is None
+        iterator = tqdm(predictions, desc="Judging") if use_tqdm else predictions
         
-        for pred in iterator:
-            expected = expected_lookup.get(pred.question)
-            response = self.judge(pred, expected)
-            responses.append(response)
+        for i, pred in enumerate(iterator, start=1):
+            try:
+                expected = expected_lookup.get(pred.question)
+                response = self.judge(pred, expected)
+                responses.append(response)
+            finally:
+                if progress_callback:
+                    progress_callback(i, total, pred)
         
         # Save if output_dir provided
         if output_dir:

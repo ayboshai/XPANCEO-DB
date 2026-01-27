@@ -10,24 +10,30 @@ import os
 import sys
 
 # Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
 
 import yaml
+from dotenv import load_dotenv
 
 
 def load_config(config_path: str = "config/master_config.yaml") -> dict:
-    """Load configuration from YAML file."""
+    """Load configuration from YAML file. .env takes priority over system env."""
+    env_path = os.path.join(PROJECT_ROOT, ".env")
+    if os.path.exists(env_path):
+        load_dotenv(env_path, override=True)
+
     def resolve_env(value):
         if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
             return os.getenv(value[2:-1], "")
         return value
-    
+
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
-    
+
     for key, value in config.items():
         config[key] = resolve_env(value)
-    
+
     return config
 
 
@@ -117,11 +123,12 @@ def main():
         table_count=args.table_count,
         image_count=args.image_count,
         no_answer_count=args.no_answer_count,
+        use_ragas=False,
     )
     
     # Save
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    save_dataset(entries, args.out)
+    save_dataset(entries, args.out, chunks_file=pipeline.chunks_file)
     
     # Summary
     slice_counts = {}

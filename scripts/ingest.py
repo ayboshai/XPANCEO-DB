@@ -10,28 +10,41 @@ import os
 import sys
 
 # Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
 
 import yaml
+from dotenv import load_dotenv
 from tqdm import tqdm
 
 from ingestion.pipeline import IngestionPipeline
 
 
 def load_config(config_path: str = "config/master_config.yaml") -> dict:
-    """Load configuration from YAML file."""
+    """
+    Load configuration from YAML file.
+
+    IMPORTANT: .env file takes priority over system environment variables
+    to prevent accidental use of wrong API keys.
+    """
+    # Load .env file with override=True to prioritize local config
+    env_path = os.path.join(PROJECT_ROOT, ".env")
+    if os.path.exists(env_path):
+        load_dotenv(env_path, override=True)
+        logging.info(f"Loaded environment from: {env_path}")
+
     def resolve_env(value):
         if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
             env_var = value[2:-1]
             return os.getenv(env_var, "")
         return value
-    
+
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
-    
+
     for key, value in config.items():
         config[key] = resolve_env(value)
-    
+
     return config
 
 
@@ -68,6 +81,13 @@ Examples:
         level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
+
+    # CRITICAL: Silence noisy HTTP loggers (even in verbose mode)
+    # These write base64-encoded images and bloat logs to gigabytes
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
     
     # Validate folder
     if not os.path.isdir(args.pdf_folder):

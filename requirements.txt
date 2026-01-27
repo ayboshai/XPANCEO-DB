@@ -9,6 +9,7 @@ unstructured[pdf]>=0.10.0
 pytesseract>=0.3.10
 pdf2image>=1.16.0
 PyPDF2>=3.0.0  # Fallback parser
+pdfplumber>=0.10.0  # Table extraction
 
 # Vector Index
 faiss-cpu>=1.7.4

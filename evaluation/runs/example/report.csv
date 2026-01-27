@@ -1,5 +1,0 @@
-slice,count,faithfulness,relevancy,context_precision,context_recall,no_answer_accuracy,false_positive_rate
-overall,50,0.823,0.791,0.756,0.682,,
-table,12,0.845,0.812,0.789,0.734,,
-image,10,0.756,0.723,0.698,0.612,,
-no-answer,8,0.912,0.889,0.445,0.312,0.875,0.125

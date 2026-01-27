@@ -13,27 +13,28 @@ openai_api_key: ${OPENAI_API_KEY}
 # Models
 # =============================================================================
 model_chat: gpt-4o-mini              # LLM for generation
-model_vision: gpt-4o-mini            # Vision API for image captioning
+model_vision: gpt-4o-mini            # Vision API for image captioning (supports vision!)
 model_embed: text-embedding-3-small  # Embedding model (dim=1536)
 
 # =============================================================================
 # Index Backend
 # =============================================================================
 index_backend: faiss                 # Only 'faiss' is supported
-top_k: 5                             # Number of chunks to retrieve
+top_k: 12                            # Number of chunks to retrieve (table/image recall boost)
 
 # Hybrid retrieval (optional)
-hybrid_enabled: false                # Enable BM25 union with dense search
+hybrid_enabled: true                 # Enable BM25 union with dense search
 
 # =============================================================================
 # Chunking
 # =============================================================================
-chunk_size_tokens: 512               # Max tokens per chunk
+chunk_size_tokens: 400               # Max tokens per chunk
 chunk_overlap_tokens: 50             # Overlap between chunks
 
 # =============================================================================
-# OCR Thresholds (ANY condition triggers Vision fallback)
+# OCR & Vision Strategy
 # =============================================================================
+# OCR Thresholds (ANY condition triggers Vision fallback)
 ocr_confidence_threshold: 60         # Tesseract confidence 0-100
 ocr_min_chars: 50                    # Minimum character count
 ocr_min_tokens: 10                   # Minimum word count
@@ -64,7 +65,7 @@ embedding_cache_dir: data/cache/embeddings  # Embeddings by content hash
 # Parallelism
 # =============================================================================
 max_concurrent_embeddings: 5         # Parallel embedding requests
-max_concurrent_vision: 2             # Parallel vision requests
+max_concurrent_vision: 4             # Parallel vision requests
 
 # =============================================================================
 # Document ID Policy
