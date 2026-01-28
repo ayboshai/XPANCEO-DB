@@ -1311,7 +1311,7 @@ def render_sidebar():
                 vision_rate = stats["vision_used"] / stats["total"] * 100 if stats["total"] else 0
                 st.caption(f"OCR fail: {ocr_rate:.1f}% | Vision used: {vision_rate:.1f}%")
             else:
-                st.info(f"No chunks found at `{paths['chunks_file']}`")
+                st.info(f"No chunks found at {paths['chunks_file']}")
 
         with st.expander("📈 Evaluation", expanded=False):
             metrics = get_last_eval_metrics(paths)
