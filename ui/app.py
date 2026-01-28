@@ -57,6 +57,12 @@ st.markdown(
         color: var(--xp-text);
     }
 
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"],
+    [data-testid="stHeader"] {
+        background: transparent !important;
+    }
+
     /* Sidebar */
     [data-testid="stSidebar"] {
         background: var(--xp-panel-2);
@@ -92,11 +98,33 @@ st.markdown(
     }
 
     /* Metrics and expanders */
-    div[data-testid="stMetric"] {
+    div[data-testid="stMetric"],
+    div[data-testid="stMetric"] > div {
         background: var(--xp-panel);
         border: 1px solid var(--xp-border);
         padding: 8px 10px;
         border-radius: 10px;
+    }
+
+    [data-testid="stMetricLabel"],
+    [data-testid="stMetricValue"] {
+        color: var(--xp-text) !important;
+    }
+
+    div[data-testid="stMetric"] * {
+        color: var(--xp-text) !important;
+    }
+
+    /* Inputs */
+    input, textarea, select, [data-testid="stTextInput"] input {
+        background: #0f1522 !important;
+        color: var(--xp-text) !important;
+        border: 1px solid var(--xp-border) !important;
+    }
+
+    [data-testid="stSelectbox"] > div {
+        background: #0f1522 !important;
+        border: 1px solid var(--xp-border) !important;
     }
 
     [data-testid="stExpander"] {
@@ -586,6 +614,7 @@ def run_ingestion(pdf_folder: str, config_path: Optional[str] = None):
     results = []
     total_pdfs = len(pdf_files)
     start_time = time.time()
+    completed_durations: List[float] = []
     for i, pdf_path in enumerate(pdf_files, start=1):
         if st.session_state.get("cancel_requested"):
             status_text.text("Cancelled by user.")
@@ -602,15 +631,19 @@ def run_ingestion(pdf_folder: str, config_path: Optional[str] = None):
             label = stage_labels.get(stage, stage)
             stage_progress.progress(stage_idx / max(stage_total, 1))
             stage_text.text(f"Stage {stage_idx}/{stage_total}: {label}")
-            # Update ETA during the current PDF based on stage progress.
+            # Update ETA using completed PDFs as baseline.
             elapsed = time.time() - start_time
-            pdf_progress_ratio = (stage_idx / max(stage_total, 1)) if total_pdfs else 0.0
-            overall_progress = ((i - 1) + pdf_progress_ratio) / max(total_pdfs, 1)
-            if overall_progress > 0:
-                remaining = elapsed * (1 / overall_progress - 1)
+            elapsed_current = time.time() - pdf_start
+
+            if completed_durations:
+                avg_pdf = sum(completed_durations) / len(completed_durations)
+                remaining_current = max(avg_pdf - elapsed_current, 0)
+                remaining = remaining_current + avg_pdf * max(total_pdfs - i, 0)
+                time_text.text(
+                    f"Elapsed: {format_duration(elapsed)} | ETA: {format_duration(remaining)}"
+                )
             else:
-                remaining = 0
-            time_text.text(f"Elapsed: {format_duration(elapsed)} | ETA: {format_duration(remaining)}")
+                time_text.text(f"Elapsed: {format_duration(elapsed)} | ETA: calculating...")
 
         try:
             entry = pipeline.ingest_pdf(str(pdf_path), stage_callback=stage_callback)
@@ -621,8 +654,10 @@ def run_ingestion(pdf_folder: str, config_path: Optional[str] = None):
                 st.session_state.cancel_requested = True
 
         pdf_progress.progress(i / total_pdfs)
+        pdf_elapsed = time.time() - pdf_start
+        completed_durations.append(pdf_elapsed)
         elapsed = time.time() - start_time
-        avg_per_pdf = elapsed / max(i, 1)
+        avg_per_pdf = sum(completed_durations) / len(completed_durations)
         remaining = avg_per_pdf * max(total_pdfs - i, 0)
         time_text.text(f"Elapsed: {format_duration(elapsed)} | ETA: {format_duration(remaining)}")
 
