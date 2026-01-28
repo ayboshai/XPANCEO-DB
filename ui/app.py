@@ -76,6 +76,14 @@ st.markdown(
         background: transparent !important;
     }
 
+    /* Markdown code pills / badges */
+    code, pre, .stMarkdown code {
+        background: #0f1522 !important;
+        color: var(--xp-text) !important;
+        border: 1px solid var(--xp-border) !important;
+        border-radius: 6px !important;
+    }
+
     /* Sidebar */
     [data-testid="stSidebar"] {
         background: var(--xp-panel-2);
@@ -216,6 +224,17 @@ st.markdown(
         background: #0f1522 !important;
         color: var(--xp-text) !important;
         border: 1px solid var(--xp-border) !important;
+    }
+
+    [data-testid="stChatInput"] > div,
+    [data-testid="stChatInput"] form,
+    [data-testid="stChatInput"] div[data-baseweb="textarea"] {
+        background: transparent !important;
+    }
+
+    [data-testid="stBottom"],
+    [data-testid="stBottom"] > div {
+        background: var(--xp-bg) !important;
     }
 
     /* File uploader */
