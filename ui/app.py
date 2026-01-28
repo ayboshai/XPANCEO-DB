@@ -51,7 +51,7 @@ st.markdown(
         --xp-border: rgba(0, 212, 255, 0.18);
     }
 
-    .stApp, body {
+    .stApp, .stApp > div, body {
         background: radial-gradient(1200px 600px at 20% -10%, rgba(0, 212, 255, 0.12), transparent 60%),
                     radial-gradient(1000px 500px at 100% 0%, rgba(123, 44, 191, 0.10), transparent 55%),
                     var(--xp-bg);
@@ -1152,8 +1152,8 @@ def render_sidebar():
         config, paths = load_active_config(st.session_state.config_path)
         eval_state = get_eval_state(paths)
 
-        st.caption(f"Config: `{Path(st.session_state.config_path).name}`")
-        st.caption(f"Data dir: `{paths['data_dir']}`")
+    st.caption(f"Config: {Path(st.session_state.config_path).name}")
+    st.caption(f"Data dir: {paths['data_dir']}")
         if eval_state["needs_eval"]:
             st.warning("Evaluation is stale for this data_dir")
         elif eval_state["last_run_dir"]:
