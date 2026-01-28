@@ -63,6 +63,12 @@ st.markdown(
         background: transparent !important;
     }
 
+    .block-container,
+    section.main,
+    .main {
+        background: transparent !important;
+    }
+
     /* Sidebar */
     [data-testid="stSidebar"] {
         background: var(--xp-panel-2);
@@ -157,10 +163,33 @@ st.markdown(
     }
 
     /* Chat input */
+    [data-testid="stChatInput"] {
+        background: transparent !important;
+    }
+
     [data-testid="stChatInput"] textarea {
         background: #0f1522 !important;
         color: var(--xp-text) !important;
         border: 1px solid var(--xp-border) !important;
+    }
+
+    /* File uploader */
+    [data-testid="stFileUploader"] {
+        background: var(--xp-panel) !important;
+        border: 1px solid var(--xp-border) !important;
+        border-radius: 10px !important;
+        padding: 10px !important;
+    }
+
+    [data-testid="stFileUploaderDropzone"],
+    [data-testid="stFileUploaderDropzone"] > div {
+        background: var(--xp-panel) !important;
+        border: 1px dashed var(--xp-border) !important;
+        color: var(--xp-text) !important;
+    }
+
+    [data-testid="stFileUploader"] * {
+        color: var(--xp-text) !important;
     }
 
     [data-testid="stExpander"] {
