@@ -109,6 +109,15 @@ Core metrics to track:
 - Relevancy
 - Context Precision
 - Context Recall
+Additional report metrics:
+- No‑Answer Accuracy (correct refusal when answer is absent)
+- False Positive Rate (answers given when the system should refuse)
+
+Metric meanings (short):
+- Faithfulness: grounded in retrieved context.
+- Relevancy: matches the question intent.
+- Context Precision: retrieved context is mostly useful (low noise).
+- Context Recall: needed facts are retrieved (coverage).
 
 ## 6) Minimal Runbook (Stable Commands)
 

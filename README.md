@@ -114,6 +114,16 @@ UI notes:
 - It can generate a dataset and run evaluation from the sidebar.
 - Ingestion shows live progress by stage (parse → images → embed/index).
 
+Evaluation metrics (what they mean):
+- **Faithfulness**: answer is grounded in the retrieved context (hallucination control).
+- **Relevancy**: answer matches the question intent.
+- **Context Precision**: retrieved context is mostly useful (noise control).
+- **Context Recall**: retrieved context covers the needed facts (coverage).
+- **No‑Answer Accuracy**: correct refusal when the answer is not in the documents.
+- **False Positive Rate**: answers given when the system should refuse.
+
+Metrics are reported by slice: `overall`, `table`, `image`, `no‑answer`.
+
 ## 7) Project Map
 
 Core modules:
