@@ -127,6 +127,42 @@ st.markdown(
         border: 1px solid var(--xp-border) !important;
     }
 
+    [data-testid="stNumberInput"] input {
+        background: #0f1522 !important;
+        color: var(--xp-text) !important;
+        border: 1px solid var(--xp-border) !important;
+    }
+
+    [data-testid="stNumberInput"] button {
+        background: #0f1522 !important;
+        color: var(--xp-text) !important;
+        border: 1px solid var(--xp-border) !important;
+    }
+
+    /* Dataframe/table */
+    [data-testid="stDataFrame"] {
+        background: var(--xp-panel) !important;
+        border: 1px solid var(--xp-border) !important;
+        border-radius: 10px !important;
+        color: var(--xp-text) !important;
+    }
+
+    [data-testid="stDataFrame"] * {
+        color: var(--xp-text) !important;
+    }
+
+    table, thead, tbody, tr, th, td {
+        background: var(--xp-panel) !important;
+        color: var(--xp-text) !important;
+    }
+
+    /* Chat input */
+    [data-testid="stChatInput"] textarea {
+        background: #0f1522 !important;
+        color: var(--xp-text) !important;
+        border: 1px solid var(--xp-border) !important;
+    }
+
     [data-testid="stExpander"] {
         background: var(--xp-panel);
         border: 1px solid var(--xp-border);
