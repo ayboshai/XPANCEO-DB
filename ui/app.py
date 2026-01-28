@@ -90,6 +90,14 @@ st.markdown(
         border-right: 1px solid var(--xp-border);
     }
 
+    @media (max-width: 900px) {
+        [data-testid="stSidebar"] {
+            background: #0b0f17 !important;
+            border-right: none !important;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35) !important;
+        }
+    }
+
     /* Headers */
     h1, h2, h3 {
         color: var(--xp-accent) !important;
