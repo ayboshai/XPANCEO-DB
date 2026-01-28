@@ -59,7 +59,9 @@ st.markdown(
 
     [data-testid="stAppViewContainer"],
     [data-testid="stMain"],
-    [data-testid="stHeader"] {
+    [data-testid="stHeader"],
+    [data-testid="stBottom"],
+    [data-testid="stMainBlockContainer"] {
         background: transparent !important;
     }
 
@@ -157,6 +159,12 @@ st.markdown(
         color: var(--xp-text) !important;
     }
 
+    div[data-baseweb="select"] [role="listbox"],
+    div[data-baseweb="select"] [role="listbox"] * {
+        background: #0f1522 !important;
+        color: var(--xp-text) !important;
+    }
+
     [data-testid="stNumberInput"] input {
         background: #0f1522 !important;
         color: var(--xp-text) !important;
@@ -165,6 +173,11 @@ st.markdown(
 
     [data-testid="stNumberInput"] button {
         background: #0f1522 !important;
+        color: var(--xp-text) !important;
+        border: 1px solid var(--xp-border) !important;
+    }
+
+    button, [role="button"], [role="combobox"] {
         color: var(--xp-text) !important;
         border: 1px solid var(--xp-border) !important;
     }
