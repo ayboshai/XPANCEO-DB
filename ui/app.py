@@ -69,6 +69,10 @@ st.markdown(
         background: transparent !important;
     }
 
+    footer {
+        background: transparent !important;
+    }
+
     /* Sidebar */
     [data-testid="stSidebar"] {
         background: var(--xp-panel-2);
@@ -133,6 +137,26 @@ st.markdown(
         border: 1px solid var(--xp-border) !important;
     }
 
+    /* BaseWeb components (Select/Input/Textarea) */
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"] > div,
+    div[data-baseweb="textarea"] > div {
+        background: #0f1522 !important;
+        color: var(--xp-text) !important;
+        border: 1px solid var(--xp-border) !important;
+    }
+
+    div[data-baseweb="select"] input,
+    div[data-baseweb="input"] input,
+    div[data-baseweb="textarea"] textarea {
+        color: var(--xp-text) !important;
+        background: transparent !important;
+    }
+
+    div[data-baseweb="select"] * {
+        color: var(--xp-text) !important;
+    }
+
     [data-testid="stNumberInput"] input {
         background: #0f1522 !important;
         color: var(--xp-text) !important;
@@ -190,6 +214,24 @@ st.markdown(
 
     [data-testid="stFileUploader"] * {
         color: var(--xp-text) !important;
+    }
+
+    [data-testid="stFileUploader"] button {
+        background: #0f1522 !important;
+        color: var(--xp-text) !important;
+        border: 1px solid var(--xp-border) !important;
+    }
+
+    /* Dataframe grid (st.dataframe) */
+    [data-testid="stDataFrame"] [role="grid"] {
+        background: var(--xp-panel) !important;
+        color: var(--xp-text) !important;
+        border: 1px solid var(--xp-border) !important;
+    }
+
+    [data-testid="stDataFrame"] [role="grid"] * {
+        color: var(--xp-text) !important;
+        background: transparent !important;
     }
 
     [data-testid="stExpander"] {
