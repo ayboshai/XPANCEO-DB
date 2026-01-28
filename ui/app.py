@@ -97,6 +97,24 @@ st.markdown(
         letter-spacing: 0.2px;
     }
 
+    /* Field labels */
+    label, .stCaption, .stMarkdown, .stTextLabel {
+        color: rgba(230, 241, 255, 0.85) !important;
+    }
+
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] .stCaption,
+    [data-testid="stSidebar"] .stMarkdown,
+    [data-testid="stSidebar"] .stTextLabel {
+        color: rgba(230, 241, 255, 0.9) !important;
+    }
+
+    /* BaseWeb labels (sliders, number inputs, selects) */
+    [data-baseweb="form-control-label"],
+    [data-baseweb="form-control-label"] * {
+        color: rgba(230, 241, 255, 0.85) !important;
+    }
+
     /* Chat messages */
     .stChatMessage {
         background: var(--xp-panel) !important;
