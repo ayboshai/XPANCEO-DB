@@ -392,14 +392,18 @@ def init_session_state():
         if key not in st.session_state:
             st.session_state[key] = value
 
+    # Keep UI key in sync with persisted env (last saved key).
+    env_key = os.getenv("OPENAI_API_KEY", "")
+    if env_key and st.session_state.get("api_key_input") != env_key:
+        st.session_state.api_key_input = env_key
+
 
 def sanitize_error_message(message: str) -> str:
     """Redact API keys and other sensitive tokens from error messages."""
     if not message:
         return message
     # Mask OpenAI keys like sk-... or sk-proj-...
-    message = re.sub(r"sk-[A-Za-z0-9_\-]{6,}", "sk-***", message)
-    message = re.sub(r"sk-proj-[A-Za-z0-9_\-]{6,}", "sk-proj-***", message)
+    message = re.sub(r"sk-(?:proj-)?[A-Za-z0-9_\-]{10,}", "sk-***", message)
     return message
 
 
@@ -1193,6 +1197,7 @@ def render_sidebar():
                         save_api_key_to_env(api_key)
                         from shared import load_config as _reload_config
                         _reload_config(st.session_state.config_path, force_reload=True)
+                        st.session_state.rag_pipeline = None
                         st.success("API key saved locally and loaded")
                     else:
                         st.warning("Enter a key first")
