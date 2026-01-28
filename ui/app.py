@@ -1152,8 +1152,8 @@ def render_sidebar():
         config, paths = load_active_config(st.session_state.config_path)
         eval_state = get_eval_state(paths)
 
-    st.caption(f"Config: {Path(st.session_state.config_path).name}")
-    st.caption(f"Data dir: {paths['data_dir']}")
+        st.caption(f"Config: {Path(st.session_state.config_path).name}")
+        st.caption(f"Data dir: {paths['data_dir']}")
         if eval_state["needs_eval"]:
             st.warning("Evaluation is stale for this data_dir")
         elif eval_state["last_run_dir"]:
