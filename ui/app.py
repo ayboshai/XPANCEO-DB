@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import re
+import html
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -180,6 +181,13 @@ st.markdown(
     button, [role="button"], [role="combobox"] {
         color: var(--xp-text) !important;
         border: 1px solid var(--xp-border) !important;
+        background: #0f1522 !important;
+    }
+
+    button[kind="primary"], button[kind="secondary"] {
+        background: #0f1522 !important;
+        color: var(--xp-text) !important;
+        border: 1px solid var(--xp-border) !important;
     }
 
     /* Dataframe/table */
@@ -240,6 +248,34 @@ st.markdown(
         background: var(--xp-panel) !important;
         color: var(--xp-text) !important;
         border: 1px solid var(--xp-border) !important;
+    }
+
+    [data-testid="stDataFrame"] [role="row"],
+    [data-testid="stDataFrame"] [role="gridcell"] {
+        background: var(--xp-panel) !important;
+        color: var(--xp-text) !important;
+    }
+
+    /* Custom table */
+    .xp-table table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--xp-panel);
+        color: var(--xp-text);
+        border: 1px solid var(--xp-border);
+        border-radius: 10px;
+        overflow: hidden;
+    }
+
+    .xp-table th,
+    .xp-table td {
+        border: 1px solid var(--xp-border);
+        padding: 6px 8px;
+        text-align: left;
+    }
+
+    .xp-table th {
+        background: rgba(0, 212, 255, 0.08);
     }
 
     [data-testid="stDataFrame"] [role="grid"] * {
@@ -584,6 +620,32 @@ def parse_report_csv(report_path: str) -> Dict[str, dict]:
             except Exception as e:
                 logger.warning(f"Failed to parse metrics row {row}: {e}")
     return metrics_by_slice
+
+
+def render_metrics_table(rows: List[dict]) -> None:
+    """Render metrics as a styled HTML table to avoid white Streamlit dataframe."""
+    if not rows:
+        return
+    headers = list(rows[0].keys())
+
+    def esc(value: object) -> str:
+        return html.escape(str(value))
+
+    thead = "".join(f"<th>{esc(h)}</th>" for h in headers)
+    tbody_rows = []
+    for row in rows:
+        cells = "".join(f"<td>{esc(row.get(h, ''))}</td>" for h in headers)
+        tbody_rows.append(f"<tr>{cells}</tr>")
+    tbody = "".join(tbody_rows)
+    table_html = f"""
+    <div class="xp-table">
+      <table>
+        <thead><tr>{thead}</tr></thead>
+        <tbody>{tbody}</tbody>
+      </table>
+    </div>
+    """
+    st.markdown(table_html, unsafe_allow_html=True)
 
 
 def get_last_eval_metrics(paths: Dict[str, str]) -> Optional[dict]:
@@ -1255,7 +1317,7 @@ def render_sidebar():
                             "fpr": round(m["false_positive_rate"], 3),
                         }
                     )
-                st.dataframe(rows, use_container_width=True, hide_index=True)
+                render_metrics_table(rows)
             else:
                 st.info("No evaluation runs found")
 
